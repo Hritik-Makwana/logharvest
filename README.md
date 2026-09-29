@@ -36,6 +36,9 @@ logharvest collect --case ./case001 --all
 
 # Browse results at http://127.0.0.1:8765
 logharvest view --case ./case001
+
+# For sudo 
+sudo "$(which logharvest)" collect/detect/view ...
 ```
 
 ## Case folder layout
