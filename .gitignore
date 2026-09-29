@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Never commit evidence or case output
+case*/
+evidence/
+manifest.jsonl
+audit.log
+*.evtx
+*.journal
+*.tracev3
