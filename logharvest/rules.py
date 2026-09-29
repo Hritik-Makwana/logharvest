@@ -20,16 +20,43 @@ RULES = {
         ("application", "opt/**/*.log"),
     ],
     "macos": [
-        ("system", "private/var/log/**/*"),
-        ("system", "private/var/db/diagnostics/**/*"),   # Unified Logging tracev3
-        ("system", "Library/Logs/**/*"),
-        ("application", "Users/*/Library/Logs/**/*"),
+        # --- system ---
+        (
+            "system",
+            "private/var/log/**/*",
+        ),  # system.log, install.log, asl/, DiagnosticMessages/ ...
+        ("system", "private/var/audit/*"),  # BSM audit trail
+        ("system", "private/var/db/diagnostics/**/*"),  # Unified Logging (*.tracev3)
+        ("system", "private/var/db/uuidtext/**/*"),  # needed to decode tracev3 offline
+        ("system", "private/var/db/timesync/*"),  # needed for tracev3 timestamps
+        ("system", "private/var/root/Library/Logs/**/*"),
+        ("system", "Library/Logs/**/*"),  # incl. DiagnosticReports (.ips/.crash)
+        ("system", "Library/Receipts/InstallHistory.plist"),
+        # --- application ---
+        (
+            "application",
+            "Users/*/Library/Logs/**/*",
+        ),  # per-user app logs + DiagnosticReports
+        (
+            "application",
+            "Users/*/Library/Containers/*/Data/Library/Logs/**/*",
+        ),  # sandboxed apps
+        ("application", "Users/*/Library/Group Containers/*/Library/Logs/**/*"),
+        ("application", "Users/*/Library/Application Support/**/*.log"),
+        (
+            "application",
+            "Users/*/Library/Containers/*/Data/Library/Application Support/**/*.log",
+        ),
+        ("application", "Library/Application Support/**/*.log"),
     ],
     "ios": [
         ("system", "private/var/logs/**/*"),
         ("system", "private/var/db/diagnostics/**/*"),
         ("system", "private/var/mobile/Library/Logs/**/*"),
-        ("application", "private/var/mobile/Containers/Data/Application/*/Library/Caches/**/*.log"),
+        (
+            "application",
+            "private/var/mobile/Containers/Data/Application/*/Library/Caches/**/*.log",
+        ),
     ],
     "android": [
         ("system", "data/anr/*"),
