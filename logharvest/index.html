@@ -1,0 +1,134 @@
+<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>LogHarvest</title>
+<style>
+:root{--bg:#f4f6f9;--panel:#fff;--fg:#1c2330;--mut:#6b7686;--bd:#e1e5eb;--hov:#eef2f8;--sel:#dce8ff;--acc:#3b6cf6;--ok:#1a8f4a;--bad:#d63b3b;--warn:#b7791f;--code:#fbfcfd;--mark:#ffe58a}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1218;--panel:#161b23;--fg:#e4e8ef;--mut:#8b96a7;--bd:#2a323e;--hov:#1d2430;--sel:#22396a;--acc:#7a9cff;--ok:#43c27a;--bad:#ff6b6b;--warn:#e3b04b;--code:#11151b;--mark:#6b5a12}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{font:13px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--fg);display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--bd)}
+header h1{font-size:15px;margin:0;font-weight:650}header h1 span{color:var(--acc)}
+.chips{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.chip{background:var(--hov);border-radius:99px;padding:3px 10px;color:var(--mut)}.chip b{color:var(--fg)}.chip.bad b{color:var(--bad)}
+.bar{display:flex;gap:8px;padding:10px 16px;flex-wrap:wrap}
+input,select,button{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--bd);border-radius:6px;padding:5px 9px}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:-1px}
+button{cursor:pointer}button:hover{background:var(--hov)}button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+#q{min-width:260px;flex:1;max-width:420px}
+main{flex:1;min-height:0;display:flex;padding:0 16px 16px}
+#list{flex:1;min-width:0;overflow:auto;background:var(--panel);border:1px solid var(--bd);border-radius:8px}
+table{border-collapse:separate;border-spacing:0;table-layout:fixed}
+th{position:sticky;top:0;z-index:2;background:var(--panel);text-align:left;font-weight:600;color:var(--mut);border-bottom:1px solid var(--bd);padding:7px 10px;cursor:pointer;user-select:none;position:sticky}
+th .rz{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:col-resize}
+th .rz:hover,th .rz.on{background:var(--acc);opacity:.5}
+td{padding:6px 10px;border-bottom:1px solid var(--bd);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+tbody tr{cursor:pointer}tbody tr:hover{background:var(--hov)}tbody tr.sel{background:var(--sel)}
+td .dir{color:var(--mut)}.tag{padding:1px 7px;border-radius:99px;font-size:11px;background:var(--hov)}
+.tag.system{color:var(--acc)}.tag.application{color:var(--warn)}
+.ok{color:var(--ok)}.bad{color:var(--bad);font-weight:600}
+.empty{padding:40px;text-align:center;color:var(--mut)}
+#split{width:10px;cursor:col-resize;display:none;flex:none}#split:hover,#split.on{background:linear-gradient(90deg,transparent 4px,var(--acc) 4px,var(--acc) 6px,transparent 6px)}
+#detail{display:none;flex-direction:column;width:var(--pw,46%);min-width:320px;background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+main.open #detail{display:flex}main.open #split{display:block}
+.dh{padding:12px 14px;border-bottom:1px solid var(--bd)}.dh .top{display:flex;gap:8px;align-items:center}
+.dh h2{font-size:14px;margin:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:8px;font-size:12px}
+.meta dt{color:var(--mut)}.meta dd{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace}
+.tools{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--bd);flex-wrap:wrap;align-items:center}
+.tools input[type=search]{flex:1;min-width:120px}.tools label{color:var(--mut);display:flex;gap:4px;align-items:center}
+#view{flex:1;overflow:auto;background:var(--code);font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:6px 0}
+.ln{display:flex}.ln:hover{background:var(--hov)}.ln .n{flex:none;width:52px;text-align:right;padding-right:10px;color:var(--mut);user-select:none}
+.ln .t{white-space:pre;flex:1}.wrap .ln .t{white-space:pre-wrap;overflow-wrap:anywhere}
+.ln.e .t{color:var(--bad)}.ln.w .t{color:var(--warn)}.ln.d .t{color:var(--mut)}
+mark{background:var(--mark);color:inherit;border-radius:2px}mark.cur{outline:2px solid var(--acc)}
+.note{padding:6px 14px;color:var(--mut);background:var(--hov);font-size:12px}
+@media(max-width:900px){#detail{position:fixed;inset:60px 8px 8px 8px;width:auto!important;z-index:9;box-shadow:0 8px 40px #0006}#split{display:none!important}}
+</style>
+<header><h1>Log<span>Harvest</span> <small id=case style="color:var(--mut);font-weight:400"></small></h1><div class=chips id=chips></div></header>
+<div class=bar>
+<input id=q type=search placeholder="Filter by path, device…  ( / )">
+<select id=fdev><option value="">All devices</option></select>
+<select id=fos><option value="">All OS</option></select>
+<select id=fcat><option value="">All types</option><option>system</option><option>application</option></select>
+<button id=reset>Reset</button></div>
+<main id=main><div id=list><table id=tbl><colgroup id=cg></colgroup><thead><tr id=hd></tr></thead><tbody id=tb></tbody></table><div id=none class=empty hidden>No files match the filters.</div></div>
+<div id=split></div>
+<section id=detail>
+<div class=dh><div class=top><h2 id=dt></h2><span id=dbadge></span><button id=vfy>Verify</button><button id=cls title="Close (Esc)">✕ Close</button></div><dl class=meta id=meta></dl></div>
+<div class=tools><select id=mode><option value=tail>Last 300 KB</option><option value=head>First 300 KB</option></select>
+<input type=search id=ps placeholder="Search in file (Enter = next)"><span id=cnt style="color:var(--mut)"></span>
+<label><input type=checkbox id=wrap>Wrap</label><a id=raw><button>Download</button></a></div>
+<div id=note class=note hidden></div><div id=view></div></section></main>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+const COLS=[{k:"source",t:"File",w:330},{k:"device",t:"Device",w:130},{k:"os",t:"OS",w:80},{k:"category",t:"Type",w:100},{k:"size",t:"Size",w:80},
+{k:"modified",t:"Modified",w:150},{k:"accessed",t:"Accessed",w:150},{k:"changed_or_created",t:"Changed / Created",w:150},{k:"verified",t:"Hash",w:80}];
+let rows=[],vis=[],sel=null,sk="modified",dir=-1,tok=0,cur=-1,lastText="";
+const fmtT=s=>s?s.slice(0,19).replace("T"," "):"",
+fmtS=n=>n==null?"":n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KB":n<1073741824?(n/1048576).toFixed(1)+" MB":(n/1073741824).toFixed(2)+" GB";
+const state=r=>r.error?"error":r.verified?"ok":"mismatch",
+badge=r=>({error:'<span class=bad>error</span>',ok:'<span class=ok>✓ verified</span>',mismatch:'<span class=bad>✗ mismatch</span>'})[state(r)];
+/* header, colgroup, resizing */
+function buildHead(){$("#cg").innerHTML=COLS.map(c=>`<col style="width:${c.w}px">`).join("");
+ $("#hd").innerHTML=COLS.map((c,i)=>`<th data-k=${c.k}>${c.t}<span class=ar></span><span class=rz data-i=${i}></span></th>`).join("");fit();arrows()}
+const fit=()=>$("#tbl").style.width=COLS.reduce((a,c)=>a+c.w,0)+"px";
+function arrows(){document.querySelectorAll("th").forEach(th=>th.querySelector(".ar").textContent=th.dataset.k==sk?(dir>0?" ▲":" ▼"):"")}
+$("#hd").addEventListener("pointerdown",e=>{const h=e.target.closest(".rz");if(!h)return;e.preventDefault();e.stopPropagation();
+ const i=+h.dataset.i,x0=e.clientX,w0=COLS[i].w;h.setPointerCapture(e.pointerId);h.classList.add("on");
+ h.onpointermove=m=>{COLS[i].w=Math.max(50,w0+m.clientX-x0);$("#cg").children[i].style.width=COLS[i].w+"px";fit()};
+ h.onpointerup=()=>{h.classList.remove("on");h.onpointermove=h.onpointerup=null;h._drag=1;setTimeout(()=>h._drag=0,0)}});
+$("#hd").addEventListener("click",e=>{if(e.target.closest(".rz"))return;const k=e.target.closest("th")?.dataset.k;if(!k)return;
+ dir=k==sk?-dir:1;sk=k;arrows();draw()});
+/* table */
+function draw(){const q=$("#q").value.toLowerCase();
+ vis=rows.filter(r=>(!q||(r.source+" "+r.device).toLowerCase().includes(q))&&(!$("#fdev").value||r.device==$("#fdev").value)&&(!$("#fos").value||r.os==$("#fos").value)&&(!$("#fcat").value||r.category==$("#fcat").value));
+ vis.sort((a,b)=>{const x=a[sk]??"",y=b[sk]??"";return(x>y?1:x<y?-1:0)*dir});
+ $("#none").hidden=vis.length>0;
+ $("#tb").innerHTML=vis.map(r=>{const p=r.source||"",j=Math.max(p.lastIndexOf("/"),p.lastIndexOf("\\"));
+  const cell={source:`<b>${esc(p.slice(j+1))}</b> <span class=dir>${esc(p.slice(0,j+1))}</span>`,category:`<span class="tag ${esc(r.category)}">${esc(r.category)}</span>`,
+  size:fmtS(r.size),modified:fmtT(r.modified),accessed:fmtT(r.accessed),changed_or_created:fmtT(r.changed_or_created),verified:badge(r)};
+  return`<tr data-i=${r.i} class="${r.i===sel?"sel":""}">`+COLS.map(c=>`<td title="${esc(r[c.k])}">${cell[c.k]??esc(r[c.k])}</td>`).join("")+"</tr>"}).join("");
+ const bad=rows.filter(r=>state(r)!=="ok").length;
+ $("#chips").innerHTML=`<span class=chip><b>${vis.length}</b> / ${rows.length} files</span><span class=chip><b>${new Set(rows.map(r=>r.device)).size}</b> devices</span><span class="chip ${bad?"bad":""}"><b>${bad}</b> hash issues</span>`}
+$("#tb").onclick=e=>{const tr=e.target.closest("tr");if(tr)openRow(+tr.dataset.i)};
+["#q","#fdev","#fos","#fcat"].forEach(s=>$(s).addEventListener("input",draw));
+$("#reset").onclick=()=>{["#q","#fdev","#fos","#fcat"].forEach(s=>$(s).value="");draw()};
+/* detail panel */
+function closeDetail(){sel=null;tok++;$("#main").classList.remove("open");document.querySelectorAll("tr.sel").forEach(t=>t.classList.remove("sel"))}
+$("#cls").onclick=closeDetail;
+function openRow(i){sel=i;const r=rows[i],my=++tok;$("#main").classList.add("open");
+ document.querySelectorAll("tr.sel").forEach(t=>t.classList.remove("sel"));$(`tr[data-i="${i}"]`)?.classList.add("sel");$(`tr[data-i="${i}"]`)?.scrollIntoView({block:"nearest"});
+ $("#dt").textContent=r.source.split(/[\\/]/).pop();$("#dt").title=r.source;$("#dbadge").innerHTML=badge(r);
+ const m=[["Source",r.source],["Device",r.device+" ("+r.os+", "+r.category+")"],["Size",fmtS(r.size)],["Modified",fmtT(r.modified)],["Accessed",fmtT(r.accessed)],["Changed/Created",fmtT(r.changed_or_created)],["Collected",fmtT(r.collected_at)],["SHA-256",r.sha256||"—"]];
+ $("#meta").innerHTML=m.map(([a,b])=>`<dt>${a}</dt><dd>${esc(b)}</dd>`).join("");
+ $("#vfy").disabled=!r.dest;$("#raw").style.display=r.dest?"":"none";$("#raw").href=`/api/raw?i=${i}`;
+ if(!r.dest){$("#note").hidden=false;$("#note").textContent=r.error||"No copy";$("#view").innerHTML="";return}
+ load(my)}
+async function load(my){const i=sel;$("#view").innerHTML='<div class=note>Loading…</div>';$("#note").hidden=true;
+ try{const d=await (await fetch(`/api/file?i=${i}&mode=${$("#mode").value}`)).json();if(my!==tok)return; /* stale response guard */
+  lastText=d.text;$("#note").hidden=!(d.binary||d.truncated);
+  $("#note").textContent=d.binary?"Binary file – showing hex dump of the first 4 KB.":`Showing ${$("#mode").value=="tail"?"the last":"the first"} part of a ${fmtS(d.size)} file. Line numbers are relative to this excerpt.`;
+  render()}catch(e){if(my===tok)$("#view").innerHTML='<div class=note>Failed to load preview.</div>'}}
+const lvl=l=>/\b(fatal|crit(ical)?|error|severe|fail(ed|ure)?|exception|panic)\b/i.test(l)?"e":/\bwarn(ing)?\b/i.test(l)?"w":/\b(debug|trace)\b/i.test(l)?"d":"";
+function render(){const q=$("#ps").value,re=q?new RegExp(reEsc(esc(q)),"gi"):null;
+ $("#view").className=$("#wrap").checked?"wrap":"";
+ $("#view").innerHTML=lastText.split("\n").map((l,n)=>`<div class="ln ${lvl(l)}"><span class=n>${n+1}</span><span class=t>${re?esc(l).replace(re,m=>`<mark>${m}</mark>`):esc(l)}</span></div>`).join("");
+ cur=-1;$("#cnt").textContent=q?document.querySelectorAll("#view mark").length+" hits":""}
+$("#ps").addEventListener("input",render);$("#wrap").onchange=render;$("#mode").onchange=()=>sel!=null&&load(++tok);
+$("#ps").addEventListener("keydown",e=>{if(e.key!=="Enter")return;const ms=[...document.querySelectorAll("#view mark")];if(!ms.length)return;
+ ms[cur]?.classList.remove("cur");cur=(cur+(e.shiftKey?-1:1)+ms.length)%ms.length;ms[cur].classList.add("cur");ms[cur].scrollIntoView({block:"center"})});
+$("#vfy").onclick=async()=>{const b=$("#vfy");b.textContent="Checking…";const d=await (await fetch("/api/verify?i="+sel)).json();
+ b.textContent=d.match?"✓ Hash matches":"✗ MODIFIED";b.className=d.match?"":"bad";setTimeout(()=>{b.textContent="Verify";b.className=""},4000)};
+/* splitter */
+$("#split").addEventListener("pointerdown",e=>{const s=e.currentTarget,tot=$("#main").clientWidth;s.setPointerCapture(e.pointerId);s.classList.add("on");
+ s.onpointermove=m=>{const w=$("#main").getBoundingClientRect().right-16-m.clientX;$("#detail").style.setProperty("--pw",Math.min(tot-360,Math.max(320,w))+"px")};
+ s.onpointerup=()=>{s.classList.remove("on");s.onpointermove=s.onpointerup=null}});
+/* keyboard */
+addEventListener("keydown",e=>{const inField=/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
+ if(e.key==="Escape"){if(inField&&document.activeElement.value){document.activeElement.value="";document.activeElement.dispatchEvent(new Event("input"));return}document.activeElement.blur();closeDetail()}
+ else if(!inField&&e.key==="/"){e.preventDefault();$("#q").focus()}
+ else if(!inField&&(e.key==="ArrowDown"||e.key==="ArrowUp")&&vis.length){e.preventDefault();
+  const p=vis.findIndex(r=>r.i===sel),n=Math.min(vis.length-1,Math.max(0,p+(e.key==="ArrowDown"?1:-1)));openRow(vis[p<0?0:n].i)}});
+buildHead();
+fetch("/api/files").then(r=>r.json()).then(d=>{rows=d.files;$("#case").textContent="· "+d.case;
+ [...new Set(rows.map(r=>r.device))].forEach(v=>$("#fdev").add(new Option(v,v)));[...new Set(rows.map(r=>r.os))].forEach(v=>$("#fos").add(new Option(v,v)));draw()});
+</script>

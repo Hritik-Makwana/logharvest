@@ -10,3 +10,5 @@ logharvest = "logharvest.cli:main"
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+[tool.setuptools.package-data]
+logharvest = ["index.html"]
