@@ -13,6 +13,8 @@ A Python tool for forensic collection of system and application logs. It detects
 
 - Python 3.12 or newer
 - Optional: `psutil` (auto-detects mounted drives), `adb` (live Android collection)
+- Optional: Use as sudo (administrator) to ensure permissions to read files are met and all log files on the system are found and readable. Without sudo, files like /var/log/auth.log and /var/log/journal/* are unreadable, so they show up as errors in the manifest.
+
 
 ## Install
 
