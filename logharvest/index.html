@@ -22,8 +22,8 @@ th .rz:hover,th .rz.on{background:var(--acc);opacity:.5}
 td{padding:6px 10px;border-bottom:1px solid var(--bd);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 tbody tr{cursor:pointer}tbody tr:hover{background:var(--hov)}tbody tr.sel{background:var(--sel)}
 td .dir{color:var(--mut)}.tag{padding:1px 7px;border-radius:99px;font-size:11px;background:var(--hov)}
-.tag.system{color:var(--acc)}.tag.application{color:var(--warn)}
-.ok{color:var(--ok)}.bad{color:var(--bad);font-weight:600}
+.tag.system{color:var(--acc)}.tag.application{color:var(--warn)}.tag.crash{color:var(--bad)}.tag.security{color:var(--warn)}.tag.volatile{color:var(--ok)}.tag.discovered{color:var(--mut)}.tag.not_collected{color:var(--bad)}
+.ok{color:var(--ok)}.bad{color:var(--bad);font-weight:600}.warn{color:var(--warn);font-weight:600}
 .empty{padding:40px;text-align:center;color:var(--mut)}
 #split{width:10px;cursor:col-resize;display:none;flex:none}#split:hover,#split.on{background:linear-gradient(90deg,transparent 4px,var(--acc) 4px,var(--acc) 6px,transparent 6px)}
 #detail{display:none;flex-direction:column;width:var(--pw,46%);min-width:320px;background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden}
@@ -47,7 +47,8 @@ mark{background:var(--mark);color:inherit;border-radius:2px}mark.cur{outline:2px
 <input id=q type=search placeholder="Filter by path, device…  ( / )">
 <select id=fdev><option value="">All devices</option></select>
 <select id=fos><option value="">All OS</option></select>
-<select id=fcat><option value="">All types</option><option>system</option><option>application</option></select>
+<select id=fcat><option value="">All types</option></select>
+<select id=fst><option value="">All status</option><option value=problem>Problems only</option><option value=mismatch>Hash mismatch</option><option value=error>Read errors</option><option value=notcoll>Not collected</option><option value=ok>Verified</option></select>
 <button id=reset>Reset</button></div>
 <main id=main><div id=list><table id=tbl><colgroup id=cg></colgroup><thead><tr id=hd></tr></thead><tbody id=tb></tbody></table><div id=none class=empty hidden>No files match the filters.</div></div>
 <div id=split></div>
@@ -65,8 +66,9 @@ const COLS=[{k:"source",t:"File",w:330},{k:"device",t:"Device",w:130},{k:"os",t:
 let rows=[],vis=[],sel=null,sk="modified",dir=-1,tok=0,cur=-1,lastText="";
 const fmtT=s=>s?s.slice(0,19).replace("T"," "):"",
 fmtS=n=>n==null?"":n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KB":n<1073741824?(n/1048576).toFixed(1)+" MB":(n/1073741824).toFixed(2)+" GB";
-const state=r=>r.error?"error":r.verified?"ok":"mismatch",
-badge=r=>({error:'<span class=bad>error</span>',ok:'<span class=ok>✓ verified</span>',mismatch:'<span class=bad>✗ mismatch</span>'})[state(r)];
+const RANK={mismatch:0,error:1,notcoll:2,ok:3};
+const state=r=>r.category==="not_collected"?"notcoll":r.error?"error":r.verified?"ok":"mismatch",
+badge=r=>({notcoll:'<span class=warn>⚠ not collected</span>',error:'<span class=bad>read error</span>',ok:'<span class=ok>✓ verified'+(r.source_was_active?' (source active)':'')+'</span>',mismatch:'<span class=bad>✗ mismatch</span>'})[state(r)];
 /* header, colgroup, resizing */
 function buildHead(){$("#cg").innerHTML=COLS.map(c=>`<col style="width:${c.w}px">`).join("");
  $("#hd").innerHTML=COLS.map((c,i)=>`<th data-k=${c.k}>${c.t}<span class=ar></span><span class=rz data-i=${i}></span></th>`).join("");fit();arrows()}
@@ -80,18 +82,18 @@ $("#hd").addEventListener("click",e=>{if(e.target.closest(".rz"))return;const k=
  dir=k==sk?-dir:1;sk=k;arrows();draw()});
 /* table */
 function draw(){const q=$("#q").value.toLowerCase();
- vis=rows.filter(r=>(!q||(r.source+" "+r.device).toLowerCase().includes(q))&&(!$("#fdev").value||r.device==$("#fdev").value)&&(!$("#fos").value||r.os==$("#fos").value)&&(!$("#fcat").value||r.category==$("#fcat").value));
- vis.sort((a,b)=>{const x=a[sk]??"",y=b[sk]??"";return(x>y?1:x<y?-1:0)*dir});
+ vis=rows.filter(r=>(!q||(r.source+" "+r.device).toLowerCase().includes(q))&&(!$("#fdev").value||r.device==$("#fdev").value)&&(!$("#fos").value||r.os==$("#fos").value)&&(!$("#fcat").value||r.category==$("#fcat").value)&&(!$("#fst").value||($("#fst").value==="problem"?state(r)!=="ok":state(r)===$("#fst").value)));
+ vis.sort((a,b)=>{const g=r=>sk==="verified"?RANK[state(r)]:(r[sk]??"");const x=g(a),y=g(b);return(x>y?1:x<y?-1:0)*dir});
  $("#none").hidden=vis.length>0;
  $("#tb").innerHTML=vis.map(r=>{const p=r.source||"",j=Math.max(p.lastIndexOf("/"),p.lastIndexOf("\\"));
   const cell={source:`<b>${esc(p.slice(j+1))}</b> <span class=dir>${esc(p.slice(0,j+1))}</span>`,category:`<span class="tag ${esc(r.category)}">${esc(r.category)}</span>`,
   size:fmtS(r.size),modified:fmtT(r.modified),accessed:fmtT(r.accessed),changed_or_created:fmtT(r.changed_or_created),verified:badge(r)};
   return`<tr data-i=${r.i} class="${r.i===sel?"sel":""}">`+COLS.map(c=>`<td title="${esc(r[c.k])}">${cell[c.k]??esc(r[c.k])}</td>`).join("")+"</tr>"}).join("");
- const bad=rows.filter(r=>state(r)!=="ok").length;
- $("#chips").innerHTML=`<span class=chip><b>${vis.length}</b> / ${rows.length} files</span><span class=chip><b>${new Set(rows.map(r=>r.device)).size}</b> devices</span><span class="chip ${bad?"bad":""}"><b>${bad}</b> hash issues</span>`}
+ const cn=k=>rows.filter(r=>state(r)===k).length,mm=cn("mismatch"),er=cn("error"),nc=cn("notcoll");
+ $("#chips").innerHTML=`<span class=chip><b>${vis.length}</b> / ${rows.length} files</span><span class=chip><b>${new Set(rows.map(r=>r.device)).size}</b> devices</span><span class="chip ${mm?"bad":""}"><b>${mm}</b> hash mismatches</span><span class="chip ${er?"bad":""}"><b>${er}</b> read errors</span><span class="chip ${nc?"bad":""}"><b>${nc}</b> not collected</span>`}
 $("#tb").onclick=e=>{const tr=e.target.closest("tr");if(tr)openRow(+tr.dataset.i)};
-["#q","#fdev","#fos","#fcat"].forEach(s=>$(s).addEventListener("input",draw));
-$("#reset").onclick=()=>{["#q","#fdev","#fos","#fcat"].forEach(s=>$(s).value="");draw()};
+["#q","#fdev","#fos","#fcat","#fst"].forEach(s=>$(s).addEventListener("input",draw));
+$("#reset").onclick=()=>{["#q","#fdev","#fos","#fcat","#fst"].forEach(s=>$(s).value="");draw()};
 /* detail panel */
 function closeDetail(){sel=null;tok++;$("#main").classList.remove("open");document.querySelectorAll("tr.sel").forEach(t=>t.classList.remove("sel"))}
 $("#cls").onclick=closeDetail;
@@ -130,5 +132,5 @@ addEventListener("keydown",e=>{const inField=/INPUT|SELECT|TEXTAREA/.test(docume
   const p=vis.findIndex(r=>r.i===sel),n=Math.min(vis.length-1,Math.max(0,p+(e.key==="ArrowDown"?1:-1)));openRow(vis[p<0?0:n].i)}});
 buildHead();
 fetch("/api/files").then(r=>r.json()).then(d=>{rows=d.files;$("#case").textContent="· "+d.case;
- [...new Set(rows.map(r=>r.device))].forEach(v=>$("#fdev").add(new Option(v,v)));[...new Set(rows.map(r=>r.os))].forEach(v=>$("#fos").add(new Option(v,v)));draw()});
+ [...new Set(rows.map(r=>r.device))].forEach(v=>$("#fdev").add(new Option(v,v)));[...new Set(rows.map(r=>r.os))].forEach(v=>$("#fos").add(new Option(v,v)));[...new Set(rows.map(r=>r.category))].forEach(v=>$("#fcat").add(new Option(v,v)));draw()});
 </script>
