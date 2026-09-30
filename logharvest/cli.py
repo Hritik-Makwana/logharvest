@@ -1,4 +1,4 @@
-import argparse, re
+import argparse, os, re
 from pathlib import Path
 from .detect import identify_os, list_targets
 from .collect import collect_tree, collect_adb
@@ -14,6 +14,8 @@ def main():
     c.add_argument("--source", nargs="*", default=[])
     c.add_argument("--all", action="store_true", help="also collect every auto-detected volume")
     c.add_argument("--max-size-mb", type=int, default=512)
+    c.add_argument("--sweep", action="store_true", help="also find log-like files no rule covers")
+    c.add_argument("--no-commands", action="store_true", help="skip live command capture (dmesg, journalctl...)")
     v = sub.add_parser("view", help="open the web viewer for a case")
     v.add_argument("--case", required=True, type=Path)
     v.add_argument("--port", type=int, default=8765)
@@ -30,8 +32,11 @@ def main():
             if t["kind"] == "adb": collect_adb(t["path"], a.case); continue
             if not t["os"]: print(f"skip {t['path']}: OS not recognised"); continue
             dev = re.sub(r"[^\w.-]+", "_", f"{t['os']}-{Path(t['path']).name or 'root'}")
-            ok, err = collect_tree(Path(t["path"]), t["os"], a.case, dev, a.max_size_mb)
-            print(f"{t['path']} [{t['os']}]: {ok} collected, {err} errors")
+            if t["os"] == "linux" and t["path"] == "/" and hasattr(os, "geteuid") and os.geteuid() != 0:
+                print("WARNING: not root. System logs, journal and /proc state will be incomplete. Re-run with sudo.")
+            r = collect_tree(Path(t["path"]), t["os"], a.case, dev, a.max_size_mb, a.sweep, not a.no_commands)
+            print(f"{t['path']} [{t['os']}]: {r['ok']} collected, {r['errors']} errors, {r['unreadable']} unreadable dirs")
+            print("  by category:", r["by_category"])
     else:
         serve(a.case, a.port)
 
