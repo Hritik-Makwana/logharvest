@@ -38,15 +38,33 @@ def file_meta(st):
                 ctime_ns=st.st_ctime_ns, mode=oct(st.st_mode), uid=st.st_uid, gid=st.st_gid,
                 inode=st.st_ino, nlink=st.st_nlink)
 
+def _err(path, e): return {"path": str(path), "error": f"{type(e).__name__}: {e}"}
+
 def _rule_matches(root, os_name, seen, unreadable):
+    """Yield (category, rule, path). Never raises on permission problems: they are
+    appended to `unreadable` and reported as not_collected."""
     for category, pattern in RULES[os_name]:
         lit = list(itertools.takewhile(lambda s: not any(c in s for c in "*?["), pattern.split("/")))
         d = root.joinpath(*lit)
-        if d.is_dir() and not os.access(d, os.R_OK | os.X_OK):
-            unreadable.append({"path": str(d), "error": "no read/traverse permission (rule prefix)"})
-        for p in root.glob(pattern, case_sensitive=False):
-            if str(p) not in seen and not p.is_symlink() and p.is_file():
-                seen.add(str(p)); yield category, pattern, p
+        try:
+            if d.is_dir() and not os.access(d, os.R_OK | os.X_OK):
+                unreadable.append({"path": str(d), "error": "no read/traverse permission (rule prefix)"})
+                continue
+        except OSError as e:                      # e.g. parent dir not traversable (EACCES/EPERM)
+            unreadable.append(_err(d, e)); continue
+        it = root.glob(pattern, case_sensitive=False)
+        while True:
+            try:
+                p = next(it)
+            except StopIteration:
+                break
+            except OSError as e:
+                unreadable.append(_err(getattr(e, "filename", None) or d, e)); break
+            try:
+                if str(p) in seen or p.is_symlink() or not p.is_file(): continue
+            except OSError as e:
+                unreadable.append(_err(p, e)); continue
+            seen.add(str(p)); yield category, pattern, p
 
 def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: int,
                  sweep=False, run_cmds=True):
@@ -109,8 +127,12 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
             do_file(category, pattern, src)
         if sweep:
             for src in walk_candidates(root, {case.resolve()}, unreadable):
-                if str(src) not in seen and not src.is_symlink():
-                    seen.add(str(src)); do_file("discovered", "sweep", src)
+                try:
+                    if str(src) in seen or src.is_symlink(): continue
+                except OSError as e:
+                    unreadable.append(_err(src, e)); continue
+                seen.add(str(src)); do_file("discovered", "sweep", src)
+        unreadable[:] = list({(u["path"], u["error"]): u for u in unreadable}.values())   # de-duplicate
         for u in unreadable:
             log({"device": device_id, "os": os_name, "category": "not_collected", "rule": "unreadable",
                  "source": u["path"], "error": u["error"], "collected_at": now()})

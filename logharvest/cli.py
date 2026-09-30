@@ -4,6 +4,19 @@ from .detect import identify_os, list_targets
 from .collect import collect_tree, collect_adb
 from .viewer import serve
 
+def is_privileged():
+    if hasattr(os, "geteuid"): return os.geteuid() == 0
+    try:
+        import ctypes; return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception: return False
+
+PRIV_HINT = {
+    "linux": "System logs, the journal and /proc state will be incomplete. Re-run with sudo.",
+    "macos": "Re-run with sudo AND grant your terminal Full Disk Access (System Settings > Privacy & Security), "
+             "otherwise system logs and Unified Logging data will be incomplete.",
+    "windows": "Re-run from an elevated (Administrator) prompt, otherwise the Security log and other system logs will be incomplete.",
+}
+
 def main():
     ap = argparse.ArgumentParser(prog="logharvest")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -32,10 +45,17 @@ def main():
             if t["kind"] == "adb": collect_adb(t["path"], a.case); continue
             if not t["os"]: print(f"skip {t['path']}: OS not recognised"); continue
             dev = re.sub(r"[^\w.-]+", "_", f"{t['os']}-{Path(t['path']).name or 'root'}")
-            if t["os"] == "linux" and t["path"] == "/" and hasattr(os, "geteuid") and os.geteuid() != 0:
-                print("WARNING: not root. System logs, journal and /proc state will be incomplete. Re-run with sudo.")
-            r = collect_tree(Path(t["path"]), t["os"], a.case, dev, a.max_size_mb, a.sweep, not a.no_commands)
-            print(f"{t['path']} [{t['os']}]: {r['ok']} collected, {r['errors']} errors, {r['unreadable']} unreadable dirs")
+            if t["os"] in PRIV_HINT:
+                if not is_privileged():
+                    print(f"WARNING: not running as root/Administrator. {PRIV_HINT[t['os']]}")
+                elif t["os"] == "macos":
+                    print("NOTE: on macOS, even sudo can be blocked by privacy protection (TCC). If files show as "
+                          "not_collected, grant your terminal Full Disk Access.")
+            try:
+                r = collect_tree(Path(t["path"]), t["os"], a.case, dev, a.max_size_mb, a.sweep, not a.no_commands)
+            except Exception as e:                       # never abort the whole run because one source failed
+                print(f"ERROR collecting {t['path']}: {type(e).__name__}: {e}"); continue
+            print(f"{t['path']} [{t['os']}]: {r['ok']} collected, {r['errors']} errors, {r['unreadable']} unreadable/not collected")
             print("  by category:", r["by_category"])
     else:
         serve(a.case, a.port)
