@@ -32,6 +32,9 @@ def main():
     v = sub.add_parser("view", help="open the web viewer for a case")
     v.add_argument("--case", required=True, type=Path)
     v.add_argument("--port", type=int, default=8765)
+    # NEW: iPhone/iPad subcommand
+    i = sub.add_parser("ios", help="collect from a USB-connected iPhone/iPad (needs pymobiledevice3)")
+    from .ios import add_args; add_args(i)
     a = ap.parse_args()
 
     if a.cmd == "detect":
@@ -57,6 +60,10 @@ def main():
                 print(f"ERROR collecting {t['path']}: {type(e).__name__}: {e}"); continue
             print(f"{t['path']} [{t['os']}]: {r['ok']} collected, {r['errors']} errors, {r['unreadable']} unreadable/not collected")
             print("  by category:", r["by_category"])
+    # NEW: iPhone branch
+    elif a.cmd == "ios":
+        from .ios import run
+        raise SystemExit(run(a))
     else:
         serve(a.case, a.port)
 
