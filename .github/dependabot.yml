@@ -2,7 +2,15 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: {interval: weekly}
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: uv
     directory: /
-    schedule: {interval: weekly}
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 3
+    groups:
+      python-deps:
+        patterns: ["*"]
