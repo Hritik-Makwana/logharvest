@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv build
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: bin-*
           path: dist/
