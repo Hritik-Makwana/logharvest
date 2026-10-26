@@ -48,7 +48,7 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/*
-            - name: Create or update the release
+      - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
