@@ -4,8 +4,8 @@ import pytest
 from logharvest.collect import collect_tree, sha256
 
 def make_linux_tree(root: Path) -> Path:
-    (root / "etc").mkdir(parents=True); (root / "etc/os-release").write_text("ID=test\n")
-    (root / "var/log").mkdir(parents=True); (root / "var/log/syslog").write_text("boot ok\n")
+    (root / "etc").mkdir(parents=True); (root / "etc/os-release").write_bytes(b"ID=test\n")
+    (root / "var/log").mkdir(parents=True); (root / "var/log/syslog").write_bytes(b"boot ok\n")
     return root
 
 def records(case: Path):
