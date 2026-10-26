@@ -24,7 +24,7 @@ jobs:
         run: uv run pytest -q
       - name: Build a single-file executable (runs on machines without Python)
         run: uv run --with pyinstaller pyinstaller --onefile --name logharvest-${{ runner.os }} --collect-data logharvest entry.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-${{ runner.os }}
           path: dist/logharvest-*
