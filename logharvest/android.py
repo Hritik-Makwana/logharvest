@@ -139,7 +139,7 @@ def _files(serial, case, ev, mf, device, category, rows, readcmd, base, srcfmt, 
 def _dump(serial, mode, case, ev, mf, device, name, cmds, category):
     rec = {"device": device, "os": "android", "category": category,
            "source": "adb shell " + cmds[0], "collected_at": now()}
-    last = "no output"
+    last, empty_cmd = "no output", None
     for cmd in cmds:
         rc, out, e = _sh(serial, _wrap(mode, cmd), timeout=300)
         if rc == 0 and out.strip():
@@ -149,14 +149,24 @@ def _dump(serial, mode, case, ev, mf, device, name, cmds, category):
                        dest=str(dest.relative_to(case)), verified=True)
             mf.write(json.dumps(rec) + "\n")
             return True
+        if rc == 0:
+            empty_cmd = cmd                    # ran fine, nothing to report: try fallbacks, else record as empty
         last = e or f"exit code {rc}, empty output"
+    if empty_cmd:                              # e.g. kernel buffer on a stock phone: a result, not a failure
+        dest = ev / name; dest.write_bytes(b""); t = utc(dest.stat().st_mtime)
+        rec.update(source="adb shell " + empty_cmd, size=0, modified=t, accessed=t, changed_or_created=t,
+                   sha256=hashlib.sha256(b"").hexdigest(), dest=str(dest.relative_to(case)),
+                   verified=True, empty=True)
+        mf.write(json.dumps(rec) + "\n")
+        return True
     rec["error"] = last
     mf.write(json.dumps(rec) + "\n")
     return False
 
 def _logcat_live(serial, case, ev, mf, device, secs):
     """Real-time capture: stream logcat (all buffers) for `secs` seconds."""
-    cmd = [*detect.ADB_CMD, "-s", serial, "logcat", "-b", "all", "-v", "threadtime", "-v", "year", "-v", "UTC"]
+    cmd = [*detect.ADB_CMD, "-s", serial, "logcat", "-b", "all", "-T", "1",     # -T 1: skip the buffer replay
+           "-v", "threadtime", "-v", "year", "-v", "UTC"]
     rec = {"device": device, "os": "android", "category": "application",
            "source": f"adb logcat -b all (live, {secs}s)", "collected_at": now()}
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
