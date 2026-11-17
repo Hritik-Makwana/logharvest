@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -789,6 +789,9 @@ wheels = [
 name = "logharvest"
 version = "0.1.0"
 source = { editable = "." }
+dependencies = [
+    { name = "psutil" },
+]
 
 [package.optional-dependencies]
 full = [
@@ -806,6 +809,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "psutil", specifier = ">=7.2.2" },
     { name = "psutil", marker = "extra == 'full'" },
     { name = "pymobiledevice3", marker = "extra == 'ios'" },
 ]
@@ -822,7 +826,7 @@ name = "loguru"
 version = "0.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "python_version < '0'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559, upload-time = "2024-12-06T11:20:56.608Z" }
 wheels = [

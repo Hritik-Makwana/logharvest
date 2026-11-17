@@ -51,29 +51,47 @@ def _windows_drives():
     except (OSError, AttributeError):
         return []
 
+
+def _fstype_for(path, parts):
+    """Filesystem type of the mounted volume that contains `path` (from psutil), else '?'."""
+    p = os.path.normcase(os.path.realpath(str(path)))
+    hits = [
+        mp
+        for mp in parts
+        if p == os.path.normcase(mp)
+        or p.startswith(os.path.normcase(mp).rstrip(os.sep) + os.sep)
+    ]
+    return parts[max(hits, key=len)] if hits else "?"
+
+
 def list_targets(extra_paths=()):
     """Mounted volumes (via psutil if installed) plus user-supplied paths
     (mounted disk images, extracted phone backups, etc.)."""
-    found = []
+    found, parts = [], {}
     try:
         import psutil
+
         for p in psutil.disk_partitions(all=False):
+            parts[p.mountpoint] = p.fstype or "?"
             # Live Mac: "/" already exposes the Data volume through firmlinks, and
             # /System/Volumes/* are internal mounts -> collecting them again = duplicates.
             if sys.platform == "darwin" and p.mountpoint.startswith("/System/Volumes/"):
                 continue
-            if sys.platform == "win32" and "cdrom" in p.opts:   # empty optical drive
+            if sys.platform == "win32" and "cdrom" in p.opts:  # empty optical drive
                 continue
-            found.append({"path": p.mountpoint, "fstype": p.fstype or "?", "kind": "volume"})
+            found.append(
+                {"path": p.mountpoint, "fstype": p.fstype or "?", "kind": "volume"}
+            )
     except ImportError:
         found.extend(_windows_drives())
     for p in extra_paths:
-        found.append({"path": str(p), "fstype": "?", "kind": "path"})
+        found.append({"path": str(p), "fstype": _fstype_for(p, parts), "kind": "path"})
     for t in found:
         t["os"] = identify_os(Path(t["path"]))
     for line in adb_devices():
         found.append({"path": line, "fstype": "-", "kind": "adb", "os": "android"})
     return found
+
 
 def adb_devices():
     try:
