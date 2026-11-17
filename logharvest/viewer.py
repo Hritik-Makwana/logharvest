@@ -18,7 +18,7 @@ def serve(case: Path, port: int):
     case = case.resolve()
 
     def load():
-        with open(case / "manifest.jsonl") as f:
+        with open(case / "manifest.jsonl", encoding="utf-8") as f:
             recs = [json.loads(l) for l in f if l.strip()]
         for i, r in enumerate(recs): r["i"] = i
         return recs

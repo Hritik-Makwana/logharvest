@@ -3,13 +3,40 @@ Globs are matched case-insensitively (NTFS/APFS images mounted on Linux)."""
 
 RULES = {
     "windows": [
+        # --- central event logs: System, Application, Security, Setup + every Microsoft-Windows-* channel ---
         ("system", "Windows/System32/winevt/Logs/*.evtx"),
         ("system", "Windows/System32/LogFiles/**/*.log"),
+        # --- Windows Update & servicing: CBS.log (+ CbsPersist cabs), DISM, WindowsUpdate ETL ---
         ("system", "Windows/Logs/**/*.log"),
-        ("system", "Windows/Panther/*.log"),
+        ("system", "Windows/Logs/CBS/*"),
+        ("system", "Windows/Logs/DISM/*"),
+        ("system", "Windows/Logs/WindowsUpdate/*"),
+        ("system", "Windows/SoftwareDistribution/ReportingEvents.log"),
+        ("system", "Windows/WindowsUpdate.log"),
+        # --- setup / upgrade / driver installation / WMI ---
+        ("system", "Windows/Panther/**/*.log"),
+        ("system", "Windows/System32/sysprep/Panther/*.log"),
+        ("system", "Windows/INF/setupapi*.log"),
+        ("system", "Windows/Debug/*.log"),
+        ("system", "Windows/System32/wbem/Logs/*.log"),
+        # --- crash ---
+        ("crash", "Windows/Minidump/*.dmp"),
+        ("crash", "ProgramData/Microsoft/Windows/WER/**/*.wer"),
+        ("crash", "Users/*/AppData/Local/CrashDumps/*.dmp"),
+        ("crash", "Users/*/AppData/Local/Microsoft/Windows/WER/**/*.wer"),
+        # --- shared application data ---
         ("application", "ProgramData/**/*.log"),
+        # --- program installation folders (older / portable apps: <App>\logs, <App>\log, <App>\*.log) ---
+        ("application", "Program Files/*/logs/**/*"),
+        ("application", "Program Files/*/log/**/*"),
+        ("application", "Program Files/*/*.log"),
+        ("application", "Program Files (x86)/*/logs/**/*"),
+        ("application", "Program Files (x86)/*/log/**/*"),
+        ("application", "Program Files (x86)/*/*.log"),
+        # --- per-user application logs ---
         ("application", "Users/*/AppData/Local/**/*.log"),
         ("application", "Users/*/AppData/Roaming/**/*.log"),
+        ("application", "Users/*/AppData/LocalLow/**/*.log"),
     ],
     "linux": [
         # --- system & kernel ---
@@ -153,3 +180,16 @@ COMMANDS = {"linux": [
     ("mount", ["mount"]), ("lsblk", ["lsblk", "-f"]), ("lsmod", ["lsmod"]),
     ("ip_addr", ["ip", "-br", "addr"]), ("sysctl_all", ["sysctl", "-a"]),
 ]}
+
+# Windows live mode (running on the machine being collected). Ordered by volatility.
+COMMANDS["windows"] = [
+    ("date_utc", ["powershell", "-NoProfile", "-Command", "(Get-Date).ToUniversalTime().ToString('o')"]),
+    ("netstat", ["netstat", "-ano"]), ("tasklist", ["tasklist", "/v", "/fo", "csv"]),
+    ("ipconfig", ["ipconfig", "/all"]), ("whoami", ["whoami", "/all"]), ("quser", ["quser"]),
+    ("systeminfo", ["systeminfo"]), ("services", ["sc", "query", "type=", "service", "state=", "all"]),
+    ("schtasks", ["schtasks", "/query", "/fo", "csv", "/v"]), ("driverquery", ["driverquery", "/v", "/fo", "csv"]),
+    ("wevtutil_channels", ["wevtutil", "el"]),
+]
+
+# Live Windows: also ask the OS to export these channels (consistent .evtx, unlike a raw copy of an open file).
+EVTX_EXPORT = ["System", "Application", "Security", "Setup"]

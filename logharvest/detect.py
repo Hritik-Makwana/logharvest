@@ -1,4 +1,4 @@
-import subprocess
+import os, subprocess
 from pathlib import Path
 from .rules import MARKERS
 
@@ -26,7 +26,9 @@ def list_targets(extra_paths=()):
         for p in psutil.disk_partitions(all=False):
             found.append({"path": p.mountpoint, "fstype": p.fstype or "?", "kind": "volume"})
     except ImportError:
-        pass
+        if hasattr(os, "listdrives"):             # Windows + Python 3.12: no psutil needed
+            for d in os.listdrives():
+                found.append({"path": d, "fstype": "?", "kind": "volume"})
     for p in extra_paths:
         found.append({"path": str(p), "fstype": "?", "kind": "path"})
     for t in found:
