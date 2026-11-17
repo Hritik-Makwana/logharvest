@@ -2,18 +2,26 @@ import getpass, hashlib, itertools, json, os, platform, stat, subprocess, sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from .rules import RULES, COMMANDS
+from .rules import RULES, COMMANDS, EVTX_EXPORT
 from .discover import walk_candidates
 
 def utc(ts): return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 def now(): return datetime.now(timezone.utc).isoformat()
 
+def lp(p):
+    """Windows: extended-length path (\\\\?\\...) so paths over 260 chars can be read/written. No-op elsewhere."""
+    if os.name != "nt": return p
+    s = os.path.abspath(str(p))
+    if s.startswith("\\\\?\\"): return s
+    return "\\\\?\\UNC\\" + s[2:] if s.startswith("\\\\") else "\\\\?\\" + s
+
 def open_ro(path):
     """Read-only open; O_NOATIME avoids bumping atime on the source (root/owner only)."""
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     try:
-        return os.fdopen(os.open(path, os.O_RDONLY | getattr(os, "O_NOATIME", 0)), "rb")
+        return os.fdopen(os.open(lp(path), flags | getattr(os, "O_NOATIME", 0)), "rb")
     except PermissionError:
-        return open(path, "rb")
+        return open(lp(path), "rb")
 
 def sha256(path, bufsize=1 << 20):
     h = hashlib.sha256()
@@ -23,7 +31,7 @@ def sha256(path, bufsize=1 << 20):
 
 def copy_hash(src, dest, bufsize=1 << 20):
     h = hashlib.sha256()
-    with open_ro(src) as fi, open(dest, "wb") as fo:
+    with open_ro(src) as fi, open(lp(dest), "wb") as fo:
         while chunk := fi.read(bufsize):
             h.update(chunk); fo.write(chunk)
     return h.hexdigest()
@@ -61,10 +69,18 @@ def _rule_matches(root, os_name, seen, unreadable):
             except OSError as e:
                 unreadable.append(_err(getattr(e, "filename", None) or d, e)); break
             try:
-                if str(p) in seen or p.is_symlink() or not p.is_file(): continue
+                if os.path.normcase(str(p)) in seen or p.is_symlink() or not p.is_file(): continue
             except OSError as e:
                 unreadable.append(_err(p, e)); continue
-            seen.add(str(p)); yield category, pattern, p
+            seen.add(os.path.normcase(str(p))); yield category, pattern, p
+
+def _live_key(root: Path, os_name: str):
+    """'linux' / 'windows' when `root` is the running machine's own system volume, else None."""
+    if os_name == "linux" and sys.platform.startswith("linux") and root == Path("/"): return "linux"
+    if os_name == "windows" and sys.platform == "win32":
+        sd = os.environ.get("SystemDrive", "C:").rstrip("\\/").lower()
+        if str(root).rstrip("\\/").lower() == sd: return "windows"
+    return None
 
 def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: int,
                  sweep=False, run_cmds=True):
@@ -72,15 +88,17 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
     case_str = str(case.resolve()) + os.sep
     by_cat, by_rule, unreadable, seen = Counter(), Counter(), [], set()
     n_ok = n_err = 0
-    with open(case / "manifest.jsonl", "a") as mf, open(case / "audit.log", "a") as al:
+    with open(case / "manifest.jsonl", "a", encoding="utf-8", newline="\n") as mf, \
+         open(case / "audit.log", "a", encoding="utf-8", newline="\n") as al:
         al.write(f"{now()} START root={root} os={os_name} user={getpass.getuser()} euid={os.geteuid() if hasattr(os,'geteuid') else '?'} "
                  f"host={platform.node()} python={sys.version.split()[0]} sweep={sweep}\n")
 
         def log(rec): mf.write(json.dumps(rec) + "\n")
 
         # 1) volatile commands first (RFC 3227 order of volatility)
-        if run_cmds and root == Path("/") and os_name == "linux" and sys.platform.startswith("linux"):
-            for name, argv in COMMANDS["linux"]:
+        live = _live_key(root, os_name) if run_cmds else None
+        if live:
+            for name, argv in COMMANDS[live]:
                 rec = {"device": device_id, "os": os_name, "category": "volatile", "rule": "command",
                        "source": " ".join(argv), "collected_at": now()}
                 try:
@@ -94,18 +112,38 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
                 except Exception as e:
                     rec["error"] = f"{type(e).__name__}: {e}"; n_err += 1
                 log(rec)
+            if live == "windows":                     # OS-made consistent copy of the live logs (Security needs Administrator)
+                for ch in EVTX_EXPORT:
+                    out = ev / "_exports" / f"{ch}.evtx"
+                    rec = {"device": device_id, "os": os_name, "category": "system", "rule": "wevtutil epl",
+                           "source": f"wevtutil epl {ch}", "collected_at": now()}
+                    try:
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        p = subprocess.run(["wevtutil", "epl", ch, str(out.resolve()), "/ow:true"],
+                                           capture_output=True, timeout=600)
+                        if p.returncode != 0 or not out.is_file():
+                            msg = (p.stderr or p.stdout).decode("utf-8", "replace").strip()[:300]
+                            raise RuntimeError(f"wevtutil exit {p.returncode}: {msg}")
+                        st = out.stat()
+                        rec.update(dest=str(out.relative_to(case)), sha256=sha256(out), size=st.st_size,
+                                   modified=utc(st.st_mtime), accessed=utc(st.st_atime),
+                                   changed_or_created=utc(st.st_ctime), verified=True)
+                        n_ok += 1; by_cat["system"] += 1
+                    except Exception as e:
+                        rec["error"] = f"{type(e).__name__}: {e}"; n_err += 1
+                    log(rec)
 
         # 2) files
         def do_file(category, rule, src):
             nonlocal n_ok, n_err
-            if str(src).startswith(case_str): return                # never collect our own output
+            if os.path.normcase(str(src)).startswith(os.path.normcase(case_str)): return                # never collect our own output
             rec = {"device": device_id, "os": os_name, "category": category, "rule": rule,
                    "source": str(src), "collected_at": now()}
             try:
-                st = src.lstat()
+                st = os.lstat(lp(src))
                 if not stat.S_ISREG(st.st_mode): return
                 rec.update(file_meta(st)); rec["xattrs"] = xattrs(src)   # metadata BEFORE reading
-                dest = ev / src.relative_to(root); dest.parent.mkdir(parents=True, exist_ok=True)
+                dest = ev / src.relative_to(root); os.makedirs(lp(dest.parent), exist_ok=True)
                 if category == "volatile":                               # /proc etc: read once
                     data = b""
                     with open(src, "rb") as f:                            # small chunks: /proc rejects huge reads
@@ -114,9 +152,9 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
                 else:
                     if st.st_size > max_mb << 20: raise ValueError(f"NOT COLLECTED: larger than {max_mb} MB")
                     digest = copy_hash(src, dest)                        # hashed while streaming
-                    st2 = src.lstat()
+                    st2 = os.lstat(lp(src))
                     rec["source_was_active"] = (st2.st_size, st2.st_mtime_ns) != (st.st_size, st.st_mtime_ns)
-                os.utime(dest, ns=(st.st_atime_ns, st.st_mtime_ns))
+                os.utime(lp(dest), ns=(st.st_atime_ns, st.st_mtime_ns))
                 rec.update(sha256=digest, dest=str(dest.relative_to(case)), verified=(sha256(dest) == digest))
                 n_ok += 1; by_cat[category] += 1; by_rule[f"{category}|{rule}"] += 1
             except Exception as e:
@@ -128,17 +166,17 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
         if sweep:
             for src in walk_candidates(root, {case.resolve()}, unreadable):
                 try:
-                    if str(src) in seen or src.is_symlink(): continue
+                    if os.path.normcase(str(src)) in seen or src.is_symlink(): continue
                 except OSError as e:
                     unreadable.append(_err(src, e)); continue
-                seen.add(str(src)); do_file("discovered", "sweep", src)
+                seen.add(os.path.normcase(str(src))); do_file("discovered", "sweep", src)
         unreadable[:] = list({(u["path"], u["error"]): u for u in unreadable}.values())   # de-duplicate
         for u in unreadable:
             log({"device": device_id, "os": os_name, "category": "not_collected", "rule": "unreadable",
                  "source": u["path"], "error": u["error"], "collected_at": now()})
         al.write(f"{now()} END ok={n_ok} errors={n_err} unreadable_dirs={len(unreadable)}\n")
     (case / f"coverage-{device_id}.json").write_text(json.dumps(
-        {"by_category": by_cat, "by_rule": by_rule, "unreadable": unreadable}, indent=1))
+        {"by_category": by_cat, "by_rule": by_rule, "unreadable": unreadable}, indent=1), encoding="utf-8")
     return {"ok": n_ok, "errors": n_err, "by_category": dict(by_cat), "unreadable": len(unreadable)}
 
 def collect_adb(serial: str, case: Path):

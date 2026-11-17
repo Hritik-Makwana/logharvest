@@ -17,6 +17,11 @@ PRIV_HINT = {
     "windows": "Re-run from an elevated (Administrator) prompt, otherwise the Security log and other system logs will be incomplete.",
 }
 
+def _root(p):
+    """Windows: `C:` means "current dir on C:"; make it the drive root."""
+    s = str(p)
+    return s + "\\" if os.name == "nt" and re.fullmatch(r"[A-Za-z]:", s) else s
+
 def main():
     ap = argparse.ArgumentParser(prog="logharvest")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -38,16 +43,20 @@ def main():
     a = ap.parse_args()
 
     if a.cmd == "detect":
-        for t in list_targets(a.source):
+        for t in list_targets([_root(p) for p in a.source]):
             print(f"{t['kind']:7} {t['path']:35} fs={t['fstype']:8} os={t['os']}")
     elif a.cmd == "collect":
         a.case.mkdir(parents=True, exist_ok=True)
-        targets = list_targets(a.source) if a.all else \
-            [{"path": p, "kind": "path", "os": identify_os(Path(p))} for p in a.source]
+        src = [_root(p) for p in a.source]
+        targets = list_targets(src) if a.all else \
+            [{"path": p, "kind": "path", "os": identify_os(Path(p))} for p in src]
+        if not targets:
+            print("Nothing to collect: pass --source <volume root> (e.g. C:/ or /) or --all.")
         for t in targets:
             if t["kind"] == "adb": collect_adb(t["path"], a.case); continue
-            if not t["os"]: print(f"skip {t['path']}: OS not recognised"); continue
-            dev = re.sub(r"[^\w.-]+", "_", f"{t['os']}-{Path(t['path']).name or 'root'}")
+            if not t["os"]: print(f"skip {t['path']}: OS not recognised (--source must be a volume root, e.g. C:/ or /)"); continue
+            pp = Path(t["path"])
+            dev = re.sub(r"[^\w.-]+", "_", f"{t['os']}-{pp.name or pp.drive.rstrip(':/' + chr(92)) or 'root'}")
             if t["os"] in PRIV_HINT:
                 if not is_privileged():
                     print(f"WARNING: not running as root/Administrator. {PRIV_HINT[t['os']]}")
