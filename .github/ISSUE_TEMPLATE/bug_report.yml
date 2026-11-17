@@ -1,0 +1,97 @@
+name: Bug report
+description: A collection failed, something was missed, or the viewer shows something wrong
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never attach real evidence, case folders, manifests or logs from a real case.**
+        Logs contain personal data, and an issue tracker is not a safe place for anything collected under a warrant or consent.
+        Describe what you saw, and paste only the short error text asked for below, with names and addresses removed.
+  - type: input
+    id: version
+    attributes:
+      label: Tool version
+      description: Release tag or commit hash (`git rev-parse --short HEAD`)
+      placeholder: v0.1.0 or a1b2c3d
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Linux collection
+        - Windows collection
+        - macOS collection
+        - Android
+        - iOS
+        - Viewer (web UI)
+        - CI / build
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host machine (the computer running the tool)
+      placeholder: Arch Linux, Python 3.12, uv
+    validations:
+      required: true
+  - type: dropdown
+    id: privileges
+    attributes:
+      label: Privileges the tool ran with
+      options:
+        - root / Administrator / sudo
+        - normal user
+        - not sure
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Target (what you collected from)
+      description: Device or source, with OS version
+      placeholder: "iPhone 16, iOS 18.x, USB-C   |   Linux live system   |   mounted Windows image"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command you ran
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: errors
+    attributes:
+      label: Error text
+      description: Any traceback, plus the `error` text of `not_collected` rows. Remove personal paths and names first.
+      render: text
+  - type: textarea
+    id: coverage
+    attributes:
+      label: Coverage summary (optional)
+      description: The `by_category` counts printed at the end of a run. Counts only, not file paths.
+      render: text
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have removed personal data and have not attached any real case material.
+          required: true

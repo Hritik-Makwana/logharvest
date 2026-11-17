@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose a new collection source, parser, viewer feature or pipeline improvement
+title: "[feature] "
+labels: ["feature", "needs-triage"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Linux collection
+        - Windows collection
+        - macOS collection
+        - Android
+        - iOS
+        - Parsers / analysis
+        - Viewer (web UI)
+        - CI / build
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The investigation problem
+      description: "What are you trying to find out? Example: an app hung at 14:32 and I need the cause."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: forensic
+    attributes:
+      label: Forensic impact
+      description: Does it write to or change the target? Change what is collected, hashed or timestamped? Need extra privileges?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing tools (Plaso, Velociraptor, iLEAPP, MVT...) that already do part of this

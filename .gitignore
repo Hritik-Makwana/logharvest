@@ -13,3 +13,14 @@ audit.log
 *.evtx
 *.journal
 *.tracev3
+
+# --- logharvest: never commit collected evidence or case output ---
+case*/
+evidence/
+manifest.jsonl
+audit.log
+coverage-*.json
+*.logarchive/
+*.tracev3
+*.dmp
+*.mdmp
