@@ -22,6 +22,10 @@ def main():
     c.add_argument("--source", nargs="*", default=[])
     c.add_argument("--all", action="store_true", help="also collect every auto-detected volume")
     c.add_argument("--max-size-mb", type=int, default=512)
+    c.add_argument("--sweep", action="store_true",
+                   help="also sweep the volume for log-like files that no rule covers")
+    c.add_argument("--no-commands", action="store_true",
+                   help="live Linux/Windows: skip the volatile commands and wevtutil exports")
     c.add_argument("--logarchive-days", type=int, default=0, metavar="N",
                    help="live Mac + root: also run `log collect --last Nd` into a .logarchive")
     c.add_argument("--adb", nargs="*", default=None, metavar="SERIAL",
@@ -64,8 +68,10 @@ def main():
                       f"paired '- Data' volume - mount it and pass it as another --source")
             label = root.name or root.drive.rstrip(":\\") or "root"     # C:\ -> "C", /mnt/win -> "win"
             dev = re.sub(r"[^\w.-]+", "_", f"{t['os']}-{label}")
-            ok, err = collect_tree(root, t["os"], a.case, dev, a.max_size_mb)
-            print(f"{t['path']} [{t['os']}]: {ok} collected, {err} errors")
+            res = collect_tree(root, t["os"], a.case, dev, a.max_size_mb,
+                               sweep=a.sweep, run_cmds=not a.no_commands)
+            print(f"{t['path']} [{t['os']}]: {res['ok']} collected, {res['errors']} errors, "
+                  f"{res['unreadable']} unreadable dirs")
         if a.adb is not None:
             serials = a.adb or adb_devices()
             if not serials:

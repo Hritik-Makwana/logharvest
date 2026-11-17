@@ -8,6 +8,15 @@ from .discover import walk_candidates
 def utc(ts): return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 def now(): return datetime.now(timezone.utc).isoformat()
 
+def is_admin() -> bool:
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        return os.geteuid() == 0
+    except Exception:
+        return False
+
 def lp(p):
     """Windows: extended-length path (\\\\?\\...) so paths over 260 chars can be read/written. No-op elsewhere."""
     if os.name != "nt": return p
@@ -41,10 +50,13 @@ def xattrs(p):
     except (AttributeError, OSError): return {}
 
 def file_meta(st):
-    return dict(size=st.st_size, modified=utc(st.st_mtime), accessed=utc(st.st_atime),
+    m = dict(size=st.st_size, modified=utc(st.st_mtime), accessed=utc(st.st_atime),
                 changed_or_created=utc(st.st_ctime), mtime_ns=st.st_mtime_ns, atime_ns=st.st_atime_ns,
                 ctime_ns=st.st_ctime_ns, mode=oct(st.st_mode), uid=st.st_uid, gid=st.st_gid,
                 inode=st.st_ino, nlink=st.st_nlink)
+    if hasattr(st, "st_birthtime"):               # macOS, and Windows on 3.12+: real creation time
+        m["created"] = utc(st.st_birthtime)
+    return m
 
 def _err(path, e): return {"path": str(path), "error": f"{type(e).__name__}: {e}"}
 
@@ -91,7 +103,7 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
     with open(case / "manifest.jsonl", "a", encoding="utf-8", newline="\n") as mf, \
          open(case / "audit.log", "a", encoding="utf-8", newline="\n") as al:
         al.write(f"{now()} START root={root} os={os_name} user={getpass.getuser()} euid={os.geteuid() if hasattr(os,'geteuid') else '?'} "
-                 f"host={platform.node()} python={sys.version.split()[0]} sweep={sweep}\n")
+                 f"host={platform.node()} python={sys.version.split()[0]} admin={is_admin()} sweep={sweep}\n")
 
         def log(rec): mf.write(json.dumps(rec) + "\n")
 
@@ -179,22 +191,29 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
         {"by_category": by_cat, "by_rule": by_rule, "unreadable": unreadable}, indent=1), encoding="utf-8")
     return {"ok": n_ok, "errors": n_err, "by_category": dict(by_cat), "unreadable": len(unreadable)}
 
-def collect_adb(serial: str, case: Path):
-    """Live Android: bugreport (rich system logs) + logcat dump."""
-    ev = case / "evidence" / f"adb-{serial}"; ev.mkdir(parents=True, exist_ok=True)
-    jobs = {"bugreport.zip": ["adb", "-s", serial, "bugreport", str(ev / "bugreport.zip")],
-            "logcat.txt": ["adb", "-s", serial, "logcat", "-d", "-b", "all"]}
-    with open(case / "manifest.jsonl", "a") as mf:
-        for name, cmd in jobs.items():
-            out = ev / name
-            if name == "logcat.txt":
-                with open(out, "wb") as f: subprocess.run(cmd, stdout=f, timeout=300)
-            else:
-                subprocess.run(cmd, timeout=900)
-            if out.exists():
-                st = out.stat()
-                mf.write(json.dumps({"device": f"adb-{serial}", "os": "android", "category": "system",
-                    "source": " ".join(cmd), "collected_at": now(), "size": st.st_size,
-                    "modified": utc(st.st_mtime), "accessed": utc(st.st_atime),
-                    "changed_or_created": utc(st.st_ctime), "sha256": sha256(out),
-                    "dest": str(out.relative_to(case)), "verified": True}) + "\n")
+def collect_macos_logarchive(case: Path, days: int = 7):
+    """Live Mac only, needs root. Uses Apple's own `log collect` to build a .logarchive
+    (openable with Console.app or `log show --archive`)."""
+    if sys.platform != "darwin":
+        print("logarchive: only available when running on macOS"); return 0
+    if os.geteuid() != 0:
+        print("logarchive: needs root (run with sudo)"); return 0
+    ev = case / "evidence" / "macos-live"; ev.mkdir(parents=True, exist_ok=True)
+    out = ev / "system.logarchive"
+    cmd = ["log", "collect", "--last", f"{days}d", "--output", str(out)]
+    with open(case / "audit.log", "a", encoding="utf-8", newline="\n") as al:
+        al.write(f"{now()} RUN {' '.join(cmd)}\n")
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if r.returncode != 0 or not out.exists():
+        print(f"logarchive failed: {r.stderr.strip() or r.stdout.strip()}"); return 0
+    n = 0
+    with open(case / "manifest.jsonl", "a", encoding="utf-8", newline="\n") as mf:
+        for f in sorted(out.rglob("*")):
+            if not f.is_file() or f.is_symlink():
+                continue
+            st = f.stat()
+            rec = {"device": "macos-live", "os": "macos", "category": "system", "rule": "log collect",
+                   "source": " ".join(cmd) + f"  ->  {f.relative_to(out)}", "collected_at": now(),
+                   "sha256": sha256(f), "dest": str(f.relative_to(case)), "verified": True, **file_meta(st)}
+            mf.write(json.dumps(rec) + "\n"); n += 1
+    return n
