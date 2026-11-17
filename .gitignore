@@ -4,6 +4,8 @@ __pycache__/
 build/
 dist/
 .venv/
+.vscode/
+.DS_Store
 
 # Never commit evidence or case output
 case*/
