@@ -14,7 +14,7 @@ What is read, and how far each format has been verified:
   macOS    DiagnosticReports: .ips (JSON), .crash/.hang/.spin (text), .panic.
   iOS      crash reports pulled from the phone (.ips), including JetsamEvent (memory kills).
 """
-import gzip, json, os, re, shutil
+import gzip, json, re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path

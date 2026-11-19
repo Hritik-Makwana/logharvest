@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from logharvest.collect import collect_tree
-from logharvest.rules import rules_for, RULES, RULES_FAST, RULES_FULL, PROFILES
+from logharvest.rules import rules_for, RULES_FAST, RULES_FULL, PROFILES
 
 ROOT = Path(__file__).resolve().parents[1]
 FAST = ["Windows/System32/winevt/Logs/System.evtx", "Windows/Logs/CBS/CBS.log", "Windows/Minidump/a.dmp", "Windows/System32/LogFiles/Srt/SrtTrail.txt"]
