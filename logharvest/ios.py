@@ -15,12 +15,15 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .progress import Progress, Spinner
+
 def now(): return datetime.now(timezone.utc).isoformat()
 def utc(ts): return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 
 # name -> definition. {out} is replaced with the destination path inside the case folder.
 STEPS = {
     "device_info":   dict(category="context",  args=["lockdown", "info"], capture="device_info.json", timeout=60),
+    "apps_list":     dict(category="context",  args=["apps", "list"], capture="apps_list.json", timeout=120),   # unverified command
     "live_syslog":   dict(category="volatile", args=["syslog", "live"], capture="live_syslog.txt", live=True),
     "logarchive":    dict(category="system",   args=["syslog", "collect", "{out}"], out="system_logs.logarchive", timeout=1800),
     "crash_reports": dict(category="crash",    args=["crash", "pull", "{out}"], out="crash_reports", mkdir=True, timeout=1800),
@@ -78,7 +81,7 @@ def _files(p: Path):
     if p.is_dir(): return sorted(x for x in p.rglob("*") if x.is_file() and not x.is_symlink())
     return []
 
-def collect_ios(case: Path, dev: dict, steps: list, live_seconds=0, authority=""):
+def collect_ios(case: Path, dev: dict, steps: list, live_seconds=0, authority="", opts=None):
     udid = dev["udid"]; did = f"ios-{udid[:8]}"
     ev = case / "evidence" / did; cmds = ev / "_commands"; cmds.mkdir(parents=True, exist_ok=True)
     extra = ["--udid", udid] if dev.get("multiple") else []   # only needed when several devices are attached
@@ -105,8 +108,9 @@ def collect_ios(case: Path, dev: dict, steps: list, live_seconds=0, authority=""
               f"pymobiledevice3={ver!r} authority={authority!r} steps={','.join(steps)}")
         audit("NOTE iOS records pairing/trust and every service connection on the device; this is unavoidable footprint")
 
+        sbar = Progress("iOS collection", len(steps), "steps")
         for name in steps:
-            s = STEPS[name]
+            s = STEPS[name]; sbar.set_item(name)
             timeout = live_seconds if s.get("live") else s["timeout"]
             out = ev / s["out"] if "out" in s else None
             if out is not None and s.get("mkdir"): out.mkdir(parents=True, exist_ok=True)
@@ -115,9 +119,14 @@ def collect_ios(case: Path, dev: dict, steps: list, live_seconds=0, authority=""
             se = cmds / f"{name}.stderr.txt"
             audit(f"RUN {name}: {' '.join(argv)}")
             try:
-                rc, err, timed_out, secs = _run(argv, so, se, timeout)
+                if name in ("backup", "sysdiagnose", "live_syslog", "syslog_archive") or s.get("live") or timeout > 600:
+                    with Spinner(f"{name} (running on the phone)", watch=out):
+                        rc, err, timed_out, secs = _run(argv, so, se, timeout)
+                else:
+                    rc, err, timed_out, secs = _run(argv, so, se, timeout)
             except OSError as e:
                 rc, err, timed_out, secs = -1, f"{type(e).__name__}: {e}", False, 0
+            sbar.update(1)
             produced = [so] if "capture" in s else _files(out)
             ok = bool(produced) and (rc == 0 or (s.get("live") and timed_out))
             audit(f"DONE {name}: rc={rc} timed_out={timed_out} files={len(produced)} seconds={secs}")
@@ -135,8 +144,16 @@ def collect_ios(case: Path, dev: dict, steps: list, live_seconds=0, authority=""
                          source=f"ios://{udid}/{name}", collected_at=now(), command=" ".join(argv),
                          error=f"{reason}. {err}".strip()))
                 n_err += 1
-        audit(f"END ok={n_ok} not_collected={n_err}")
-    return dict(device=did, ok=n_ok, not_collected=n_err, by_category=dict(by_cat))
+        sbar.close()
+        extra_ok = 0
+        if opts is not None and not getattr(opts, "no_suspects", False):
+            try:
+                from .ios_apps import auto
+                extra_ok = auto(case, did, udid, ev, pmd, extra, opts, "backup" in steps) or 0
+            except Exception as e:                  # the analysis must never lose the evidence already collected
+                audit(f"SUSPECTS failed: {type(e).__name__}: {e}"); print(f"suspect analysis failed: {type(e).__name__}: {e}")
+        audit(f"END ok={n_ok + extra_ok} not_collected={n_err}")
+    return dict(device=did, ok=n_ok + extra_ok, not_collected=n_err, by_category=dict(by_cat))
 
 def add_args(ap):
     ap.add_argument("--case", type=Path, help="case folder (created if missing)")
@@ -146,27 +163,39 @@ def add_args(ap):
     ap.add_argument("--sysdiagnose", action="store_true", help="also pull a sysdiagnose (slow; creates a file on the device)")
     ap.add_argument("--backup", action="store_true", help="also take a full backup (large; changes backup state on the device)")
     ap.add_argument("--authority", default="", help="warrant / consent reference, recorded in audit.log")
+    ap.add_argument("--no-suspects", action="store_true", help="do not look for crashed/killed apps in the crash reports")
+    ap.add_argument("--max-suspects", type=int, default=5, help="collect data of at most this many suspect apps (default 5)")
+    ap.add_argument("--suspect-days", type=int, default=14, help="only reports within N days of the newest one count; 0 = no limit (default 14)")
+    ap.add_argument("--no-app-folders", action="store_true", help="report suspects but do not try to collect their data")
+    ap.add_argument("--max-app-files", type=int, default=300, help="max files per app (default 300)")
+    ap.add_argument("--max-app-mb", type=int, default=500, help="max MB per app (default 500)")
+    ap.add_argument("--max-size-mb", type=int, default=100, help="skip single app files larger than this (default 100)")
 
-def run(a):
+def pick_device(a):
+    """-> (device dict or None, exit code)."""
     try: devs = list_devices()
-    except RuntimeError as e: print(f"ERROR: {e}"); return 1
+    except RuntimeError as e: print(f"ERROR: {e}"); return None, 1
     for d in devs: print(f"  {d['udid']}  {d['name']}  {d['model']}  iOS {d['version']}  ({d['conn']})")
-    if a.list: return 0
-    if not a.case: print("ERROR: --case is required"); return 2
+    if getattr(a, "list", False): return None, 0
+    if not a.case: print("ERROR: --case is required"); return None, 2
     if not devs:
         print("No iOS device found. Check: cable/port, phone UNLOCKED, 'Trust This Computer' accepted, "
               "usbmuxd running (Linux) or Apple Devices/iTunes installed (Windows).")
-        return 1
+        return None, 1
     if a.udid: devs = [d for d in devs if d["udid"] == a.udid]
     if len(devs) != 1 and not a.udid:
-        print("Several devices attached: pass --udid."); return 2
-    if not devs: print("--udid does not match any attached device."); return 2
-    dev = dict(devs[0], multiple=bool(a.udid) and len(list_devices()) > 1)
-    steps = ["device_info"] + (["live_syslog"] if a.live_seconds > 0 else []) + ["logarchive", "crash_reports"] \
+        print("Several devices attached: pass --udid."); return None, 2
+    if not devs: print("--udid does not match any attached device."); return None, 2
+    return dict(devs[0], multiple=bool(a.udid) and len(list_devices()) > 1), 0
+
+def run(a):
+    dev, rc = pick_device(a)
+    if dev is None: return rc
+    steps = ["device_info", "apps_list"] + (["live_syslog"] if a.live_seconds > 0 else []) + ["logarchive", "crash_reports"] \
             + (["sysdiagnose"] if a.sysdiagnose else []) + (["backup"] if a.backup else [])
     a.case.mkdir(parents=True, exist_ok=True)
     print(f"Collecting from {dev['name']} ({dev['udid']}). Keep the phone unlocked and connected.")
-    r = collect_ios(a.case, dev, steps, a.live_seconds, a.authority)
+    r = collect_ios(a.case, dev, steps, a.live_seconds, a.authority, opts=a)
     print(f"{r['device']}: {r['ok']} files collected, {r['not_collected']} steps not collected")
     print("  by category:", r["by_category"])
     return 0 if r["ok"] else 1

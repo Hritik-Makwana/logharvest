@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+import sys, os, json, sqlite3, hashlib
+a = sys.argv[1:]; E = os.environ.get
+if a[:1] == ["version"]: print("4.0.0-stub"); sys.exit(0)
+if a[:2] == ["usbmux", "list"]:
+    print(json.dumps([{"Identifier": "00008140-AAAABBBBCCCC", "DeviceName": "Test iPhone", "ProductType": "iPhone17,1", "ProductVersion": "18.1", "ConnectionType": "USB"}])); sys.exit(0)
+if a[:2] == ["lockdown", "info"]: print(json.dumps({"DeviceName": "Test iPhone"})); sys.exit(0)
+if a[:2] == ["apps", "list"]:
+    print(json.dumps({"com.vendor.Foo": {"CFBundleDisplayName": "Foo", "CFBundleExecutable": "Foo", "ApplicationType": "User"},
+                      "com.vendor.Bar": {"CFBundleDisplayName": "Bar App", "CFBundleExecutable": "BarExec", "ApplicationType": "User"},
+                      "com.vendor.Files": {"CFBundleDisplayName": "Files Sharing", "CFBundleExecutable": "FilesSharing", "ApplicationType": "User"}})); sys.exit(0)
+if a[:2] == ["apps", "pull"]:
+    bundle, out = a[2], a[4]
+    if bundle == "com.vendor.Files":
+        os.makedirs(out + "/Documents", exist_ok=True); open(out + "/Documents/doc.txt", "w").write("doc\n"); sys.exit(0)
+    sys.stderr.write("ERROR: InstallationLookupFailed (app does not allow house arrest)\n"); sys.exit(1)
+if a[:2] == ["syslog", "collect"]: os.makedirs(a[2], exist_ok=True); open(a[2] + "/logdata.LiveData.tracev3", "w").write("tr"); sys.exit(0)
+if a[:2] == ["crash", "pull"]:
+    d = a[2]; os.makedirs(d + "/Retired", exist_ok=True)
+    hd = {"app_name": "Foo", "timestamp": "2026-11-17 10:00:00.00 +0530", "bundleID": "com.vendor.Foo", "bug_type": "309"}
+    bd = {"procName": "Foo", "pid": 5, "captureTime": "2026-11-17 10:00:00.5 +0530", "bundleInfo": {"CFBundleIdentifier": "com.vendor.Foo"},
+          "exception": {"type": "EXC_CRASH", "signal": "SIGABRT"}}
+    open(d + "/Foo-2026-11-17-100000.ips", "w").write(json.dumps(hd) + "\n" + json.dumps(bd))
+    jh = {"app_name": "JetsamEvent", "timestamp": "2026-11-17 11:00:00.00 +0530", "bug_type": "298"}
+    jb = {"largestProcess": "Bar", "processes": [{"name": "BarExec", "pid": 9, "reason": "per-process-limit"}, {"name": "launchd", "pid": 1}]}
+    open(d + "/JetsamEvent-2026-11-17-110000.ips", "w").write(json.dumps(jh) + "\n" + json.dumps(jb))
+    oh = {"app_name": "Ancient", "timestamp": "2026-05-01 10:00:00.00 +0530", "bundleID": "com.vendor.Ancient", "bug_type": "309"}
+    ob = {"procName": "Ancient", "pid": 6, "captureTime": "2026-05-01 10:00:00.5 +0530", "exception": {"type": "EXC_CRASH"}}
+    open(d + "/Retired/Ancient-2026-05-01-100000.ips", "w").write(json.dumps(oh) + "\n" + json.dumps(ob))
+    sys.exit(0)
+if a[:3] == ["backup2", "backup", "--full"]:
+    root = a[3] + "/00008140-AAAABBBBCCCC"; os.makedirs(root, exist_ok=True)
+    if E("STUB_ENCRYPTED"): open(root + "/Manifest.db", "wb").write(os.urandom(4096)); sys.exit(0)
+    db = sqlite3.connect(root + "/Manifest.db"); db.execute("create table Files(fileID text, domain text, relativePath text, flags integer, file blob)")
+    rows = [("AppDomain-com.vendor.Foo", "Library/Preferences/com.vendor.Foo.plist", b"prefs"), ("AppDomain-com.vendor.Foo", "Documents/notes.db", b"notes"),
+            ("AppDomain-com.vendor.Foo", "../../escape.txt", b"evil"), ("AppDomain-com.vendor.Bar", "Library/Caches/b.log", b"barlog"),
+            ("AppDomain-com.other.Z", "z.txt", b"z"), ("HomeDomain", "Library/SMS/sms.db", b"sms")]
+    for dom, rel, data in rows:
+        fid = hashlib.sha1((dom + rel).encode()).hexdigest(); os.makedirs(f"{root}/{fid[:2]}", exist_ok=True); open(f"{root}/{fid[:2]}/{fid}", "wb").write(data)
+        db.execute("insert into Files values (?,?,?,1,null)", (fid, dom, rel))
+    db.execute("insert into Files values ('dirid','AppDomain-com.vendor.Foo','Documents',2,null)")
+    db.commit(); db.close(); open(root + "/Info.plist", "w").write("<plist/>"); sys.exit(0)
+print("stub output: " + " ".join(a))
