@@ -15,7 +15,7 @@ skips, and COUNTS, the following (so the coverage report shows exactly what was 
 
 Works on real folders (fast os.scandir path) and on dissect.target image paths (plain pathlib API).
 """
-import os, re
+import os, pathlib, re
 from collections import Counter
 
 # ---------------------------------------------------------------- what counts as log-like
@@ -75,7 +75,7 @@ DEFAULT_MAX_DEPTH = 12
 
 def _is_real(path):
     """True for ordinary on-disk pathlib paths (fast scandir route); False for dissect image paths."""
-    return type(path).__module__ == "pathlib"
+    return isinstance(path, pathlib.Path)          # (a module-name test breaks on Python 3.13+, where the classes live in pathlib._local)
 
 
 def _entries(path):

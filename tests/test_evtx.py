@@ -1,7 +1,6 @@
 """Pure-Python .evtx reader, tested on synthetic files written to the documented format (no real Windows log was available offline)."""
 import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
