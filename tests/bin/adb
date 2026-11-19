@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+import sys, os, zipfile
+a = sys.argv[1:]; E = os.environ.get
+mode = E("STUB_DEVICES", "ok"); fail = E("STUB_FAIL", ""); marker = E("STUB_STATE", "/tmp") + "/adb_rooted"
+if a[:1] == ["version"]: print("Android Debug Bridge version 1.0.41\nVersion 35.0.2-12147458"); sys.exit(0)
+ROWS = {"ok": ["R58M123ABC          device usb:1-1 product:shiba model:Pixel_8 device:shiba transport_id:1"],
+        "unauth": ["R58M123ABC          unauthorized usb:1-1 transport_id:1"], "none": [],
+        "multi": ["R58M123ABC          device usb:1-1 model:Pixel_8 transport_id:1", "ZY22XYZ999          device usb:1-2 model:Galaxy transport_id:2"]}
+if a[:2] == ["devices", "-l"]:
+    print("List of devices attached"); [print(r) for r in ROWS[mode]]; sys.exit(0)
+if "-s" in a: i = a.index("-s"); a = a[:i] + a[i + 2:]
+rooted = bool(E("STUB_ROOT")) or os.path.exists(marker)
+if a[:1] == ["root"]:
+    if E("STUB_ROOTABLE"): open(marker, "w").write("1"); print("restarting adbd as root")
+    else: print("adbd cannot run as root in production builds")
+    sys.exit(0)
+if a[:1] == ["wait-for-device"]: sys.exit(0)
+j = " ".join(a)
+if fail and fail in j: sys.stderr.write("adb: error: simulated failure\n"); sys.exit(1)
+if a[:1] == ["logcat"]:
+    if E("STUB_OLDLOGCAT") and "year" in a: sys.stderr.write("Unrecognized Log format: year\n"); sys.exit(1)
+    print("2026-11-16 10:00:01.000 1000 1000 E AndroidRuntime: FATAL EXCEPTION: main")
+    print("2026-11-16 10:00:01.000 1000 1000 E AndroidRuntime: Process: com.example.app:sync, PID: 4242")
+    print("2026-11-16 10:00:05.000 1000 1000 E AndroidRuntime: FATAL EXCEPTION: main")
+    print("2026-11-16 10:00:05.000 1000 1000 E AndroidRuntime: Process: com.gone.app, PID: 77")
+    print("2026-05-01 10:00:05.000 1000 1000 E AndroidRuntime: FATAL EXCEPTION: main")
+    print("2026-05-01 10:00:05.000 1000 1000 E AndroidRuntime: Process: com.old.app, PID: 78"); sys.exit(0)
+if a[:2] == ["shell", "getprop"]:
+    print("[ro.product.model]: [Pixel 8]\n[ro.product.manufacturer]: [Google]\n[ro.build.version.release]: [14]\n[ro.build.version.sdk]: [34]"); sys.exit(0)
+if a[:5] == ["shell", "dumpsys", "activity", "exit-info"] and len(a) == 4:
+    print("ACTIVITY MANAGER EXIT INFO (dumpsys activity exit-info)\nPackage: com.other.app\n  Historical Process Exit for uid=10200\n    ApplicationExitInfo #0:\n"
+          "      timestamp=2026-11-17 15:30:00.123 pid=555 realUid=10200 packageUid=10200 definingUid=10200 user=0\n"
+          "      process=com.other.app reason=2 (LOW_MEMORY) subreason=0 (UNKNOWN) status=0\n      description=lmk kill state=empty trace=null\n"
+          "    ApplicationExitInfo #1:\n      timestamp=2026-11-17 15:40:00.000 pid=556 realUid=10200 packageUid=10200 definingUid=10200 user=0\n"
+          "      process=com.other.app reason=6 (ANR) subreason=0 (UNKNOWN) status=0\n      description=user request after error:Input dispatching timed out"); sys.exit(0)
+if a[:3] == ["shell", "date", "-u"]: print(E("STUB_CLOCK", "2026-11-17T10:00:00Z")); sys.exit(0)
+if a[:3] == ["shell", "pm", "list"]:
+    pk = ["com.example.app", "com.other.app", "com.old.app", "com.tomb.app"] + (["com.sys.app"] if "-3" not in a else [])
+    print("\n".join("package:" + p for p in pk)); sys.exit(0)
+if len(a) == 2 and a[0] == "shell" and a[1].startswith("find -H /sdcard/Android/") and "stat" in a[1] and "-iname" not in a[1]:
+    import re as _re
+    for pk in sorted(set(_re.findall(r"/sdcard/Android/(?:data|media|obb)/([^/ ]+)/", a[1]))):
+        if pk == "com.other.app": print(f"50 /sdcard/Android/data/{pk}/files/x.log\n20 /sdcard/Android/data/{pk}/cache/c.tmp")
+        if pk == "com.example.app":
+            print(f"120 /sdcard/Android/data/{pk}/files/app.log\n30 /sdcard/Android/media/{pk}/m.txt\n"
+                  f"999999999 /sdcard/Android/data/{pk}/files/huge.bin\n10 /sdcard/Android/data/{pk}/../../evil")
+    sys.exit(0)
+if a[:2] == ["shell", "id"]: print("uid=0(root) gid=0(root)" if rooted else "uid=2000(shell) gid=2000(shell) groups=2000(shell)"); sys.exit(0)
+if a[:1] == ["bugreport"]:
+    with zipfile.ZipFile(a[1], "w") as z:
+        for n in ("bugreport-SM-M325F-2026.txt", "dumpstate_log.txt", "version.txt", "proto/activity.proto", "../evil.txt", "/abs_evil.txt", "a/../../evil2.txt"):
+            z.writestr(n, "content of " + n + "\n")
+        z.writestr("FS/data/tombstones/tombstone_01", "*** *** ***\nBuild fingerprint: 'x'\nTimestamp: 2026-11-17 09:00:00.123456789+0000\nCmdline: com.tomb.app\n"
+                   "pid: 77, tid: 78, name: RenderThread  >>> com.tomb.app <<<\nuid: 10300\nsignal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0\n")
+        z.writestr("FS/data/anr/anr_2026-11-17-10-00-00", "----- pid 88 at 2026-11-17 10:00:00.000+0000 -----\nCmd line: com.other.app\nSubject: Input dispatching timed out\n")
+        z.writestr(zipfile.ZipInfo("FS/"), "")
+    print("[100%] generating bugreport"); sys.exit(0)
+ROOT_DIRS = {"/data/anr", "/data/tombstones", "/data/system/dropbox", "/sys/fs/pstore", "/data/misc/logd", "/data/misc/bootstat"}
+if a[:2] == ["pull", "-a"] and a[2].startswith("/data/data/"):
+    if not rooted: sys.stderr.write("adb: error: failed to copy: remote couldn't open: Permission denied\n"); sys.exit(1)
+    d = os.path.join(a[3], os.path.basename(a[2]), "databases"); os.makedirs(d, exist_ok=True); open(d + "/app.db", "w").write("db"); print("1 file pulled"); sys.exit(0)
+if a[:2] == ["pull", "-a"] and a[2] not in ROOT_DIRS:          # single file from shared storage
+    remote, loc = a[2], a[3]
+    if E("STUB_PULLFAIL") and E("STUB_PULLFAIL") in remote:
+        sys.stderr.write("adb: error: remote open failed: Permission denied\n"); sys.exit(1)
+    open(loc, "w").write("log from " + remote + "\n"); os.utime(loc, (1700000000, 1700000000)); print("1 file pulled"); sys.exit(0)
+if a[:2] == ["pull", "-a"]:
+    remote, loc = a[2], a[3]
+    if not rooted:
+        os.makedirs(os.path.join(loc, os.path.basename(remote)), exist_ok=True)      # real adb leaves an empty folder behind
+        sys.stderr.write(f"adb: error: failed to copy '{remote}' to '{loc}': remote couldn't open: Permission denied\n"); sys.exit(1)
+    d = os.path.join(loc, os.path.basename(remote)); os.makedirs(d, exist_ok=True)
+    for n in ("a.txt", "b.txt"):
+        p = os.path.join(d, n); open(p, "w").write(f"from {remote}/{n}\n"); os.utime(p, (1700000000, 1700000000))
+    print(f"{remote}: 2 files pulled, 0 skipped."); sys.exit(0)
+if len(a) == 2 and a[0] == "shell" and a[1].startswith("find "):
+    cmd = a[1]
+    if E("STUB_NOFINDH") and cmd.startswith("find -H"): sys.stderr.write("find: Unknown option 'H'\n"); sys.exit(1)
+    if E("STUB_SDEMPTY"): sys.exit(0)                                   # a real, genuinely empty result
+    if not (cmd.startswith("find -H") or cmd.startswith("find /sdcard/ ")): sys.exit(0)   # mimic: /sdcard symlink not followed
+    print("120 /sdcard/Android/data/com.example.app/files/app.log\n80 /sdcard/Download/crash.log\n"
+          "999999999 /sdcard/big.log\n10 /sdcard/../../evil.log\n10 /sdcard/Android/data/com.bad/files/denied.log")
+    sys.exit(0)
+if a[:2] == ["shell", "dmesg"]: sys.stderr.write("dmesg: klogctl: Operation not permitted\n"); sys.exit(1)
+print("stub output for: " + j)

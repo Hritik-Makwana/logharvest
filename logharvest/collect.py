@@ -2,8 +2,8 @@ import getpass, hashlib, itertools, json, os, platform, stat, subprocess, sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from .rules import RULES, COMMANDS, EVTX_EXPORT
-from .discover import walk_candidates
+from .rules import rules_for, COMMANDS, EVTX_EXPORT
+from .smartwalk import smart_walk, SweepStats, DEFAULT_MAX_DEPTH
 
 def utc(ts): return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -60,10 +60,10 @@ def file_meta(st):
 
 def _err(path, e): return {"path": str(path), "error": f"{type(e).__name__}: {e}"}
 
-def _rule_matches(root, os_name, seen, unreadable):
+def _rule_matches(root, os_name, seen, unreadable, scope=None, profile=None):
     """Yield (category, rule, path). Never raises on permission problems: they are
     appended to `unreadable` and reported as not_collected."""
-    for category, pattern in RULES[os_name]:
+    for category, pattern in rules_for(os_name, profile):
         lit = list(itertools.takewhile(lambda s: not any(c in s for c in "*?["), pattern.split("/")))
         d = root.joinpath(*lit)
         try:
@@ -82,6 +82,7 @@ def _rule_matches(root, os_name, seen, unreadable):
                 unreadable.append(_err(getattr(e, "filename", None) or d, e)); break
             try:
                 if os.path.normcase(str(p)) in seen or p.is_symlink() or not p.is_file(): continue
+                if scope and not scope.allows_rule_match(p.relative_to(root).as_posix().lower()): continue
             except OSError as e:
                 unreadable.append(_err(p, e)); continue
             seen.add(os.path.normcase(str(p))); yield category, pattern, p
@@ -95,14 +96,17 @@ def _live_key(root: Path, os_name: str):
     return None
 
 def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: int,
-                 sweep=False, run_cmds=True):
+                 sweep=False, run_cmds=True, max_depth=DEFAULT_MAX_DEPTH, scope=None, profile=None):
     ev = case / "evidence" / device_id
     case_str = str(case.resolve()) + os.sep
     by_cat, by_rule, unreadable, seen = Counter(), Counter(), [], set()
     n_ok = n_err = 0
+    sweep_stats = SweepStats()
+    scope = scope.bind(root) if scope else None
+    sweep = sweep or bool(scope and scope.dirs)                   # naming folders with --dir means: look there
     with open(case / "manifest.jsonl", "a", encoding="utf-8", newline="\n") as mf, \
          open(case / "audit.log", "a", encoding="utf-8", newline="\n") as al:
-        al.write(f"{now()} START root={root} os={os_name} user={getpass.getuser()} euid={os.geteuid() if hasattr(os,'geteuid') else '?'} "
+        al.write(f"{now()} START root={root} dirs={list(scope.dirs) if scope else []} exclude={list(scope.exclude) if scope else []} only_dirs={bool(scope and scope.only_dirs)} profile={profile or 'default'} os={os_name} user={getpass.getuser()} euid={os.geteuid() if hasattr(os,'geteuid') else '?'} "
                  f"host={platform.node()} python={sys.version.split()[0]} admin={is_admin()} sweep={sweep}\n")
 
         def log(rec): mf.write(json.dumps(rec) + "\n")
@@ -173,10 +177,10 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
                 rec["error"] = f"{type(e).__name__}: {e}"; n_err += 1
             log(rec)
 
-        for category, pattern, src in _rule_matches(root, os_name, seen, unreadable):
+        for category, pattern, src in _rule_matches(root, os_name, seen, unreadable, scope, profile):
             do_file(category, pattern, src)
         if sweep:
-            for src in walk_candidates(root, {case.resolve()}, unreadable):
+            for src in smart_walk(root, os_name, {case.resolve()}, unreadable, sweep_stats, max_depth, scope=scope):
                 try:
                     if os.path.normcase(str(src)) in seen or src.is_symlink(): continue
                 except OSError as e:
@@ -186,9 +190,12 @@ def collect_tree(root: Path, os_name: str, case: Path, device_id: str, max_mb: i
         for u in unreadable:
             log({"device": device_id, "os": os_name, "category": "not_collected", "rule": "unreadable",
                  "source": u["path"], "error": u["error"], "collected_at": now()})
+        if sweep:
+            al.write(f"{now()} SWEEP " + " ".join(f"{k}={v}" for k, v in sweep_stats.items()) + "\n")
         al.write(f"{now()} END ok={n_ok} errors={n_err} unreadable_dirs={len(unreadable)}\n")
     (case / f"coverage-{device_id}.json").write_text(json.dumps(
-        {"by_category": by_cat, "by_rule": by_rule, "unreadable": unreadable}, indent=1), encoding="utf-8")
+        {"profile": profile or "default", "by_category": by_cat, "by_rule": by_rule, "unreadable": unreadable,
+         **({"sweep": sweep_stats.as_dict()} if sweep else {})}, indent=1), encoding="utf-8")
     return {"ok": n_ok, "errors": n_err, "by_category": dict(by_cat), "unreadable": len(unreadable)}
 
 def collect_macos_logarchive(case: Path, days: int = 7):

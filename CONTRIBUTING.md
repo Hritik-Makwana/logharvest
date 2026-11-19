@@ -18,6 +18,7 @@
    uv run ruff check .
    uv run pytest -q
    python3 scripts/evidence_guard.py
+   python3 tests/run_tests.py      # Linux only: end-to-end flows incl. disk images (optional, slower)
    ```
 4. Open a pull request (the template has a forensic-impact checklist). Write `Closes #<n>` so the card moves to **Done** on merge.
 5. CI must be green on Linux, Windows and macOS before merging.

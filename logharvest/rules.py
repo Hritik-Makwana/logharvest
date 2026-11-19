@@ -6,8 +6,11 @@ RULES = {
         # --- central event logs: System, Application, Security, Setup + every Microsoft-Windows-* channel ---
         ("system", "Windows/System32/winevt/Logs/*.evtx"),
         ("system", "Windows/System32/LogFiles/**/*.log"),
+        ("system", "Windows/System32/LogFiles/**/*.etl"),        # WMI / boot traces (were missed: rule was .log only)
+        ("system", "Windows/System32/LogFiles/Srt/*"),            # Startup Repair: SrtTrail.txt
         # --- Windows Update & servicing: CBS.log (+ CbsPersist cabs), DISM, WindowsUpdate ETL ---
         ("system", "Windows/Logs/**/*.log"),
+        ("system", "Windows/Logs/**/*.etl"),                      # SIH, waasmedic, NetSetup traces
         ("system", "Windows/Logs/CBS/*"),
         ("system", "Windows/Logs/DISM/*"),
         ("system", "Windows/Logs/WindowsUpdate/*"),
@@ -23,6 +26,8 @@ RULES = {
         ("crash", "Windows/Minidump/*.dmp"),
         ("crash", "ProgramData/Microsoft/Windows/WER/**/*.wer"),
         ("crash", "Users/*/AppData/Local/CrashDumps/*.dmp"),
+        ("crash", "Users/*/AppData/Local/Google/Chrome/User Data/Crashpad/reports/*"),
+        ("crash", "Users/*/AppData/Local/Microsoft/Edge/User Data/Crashpad/reports/*"),
         ("crash", "Users/*/AppData/Local/Microsoft/Windows/WER/**/*.wer"),
         # --- shared application data ---
         ("application", "ProgramData/**/*.log"),
@@ -234,3 +239,133 @@ COMMANDS["windows"] = [
 
 # Live Windows: also ask the OS to export these channels (consistent .evtx, unlike a raw copy of an open file).
 EVTX_EXPORT = ["System", "Application", "Security", "Setup"]
+
+
+# =====================================================================================================================
+# Scan profiles:  --profile fast | (default: not passed) | full
+#   fast     small, high-value set: the logs that answer "what crashed / rebooted / failed and when" in seconds.
+#   default  RULES above (every well-known log location).
+#   full     default + RULES_FULL: forensic artefacts (registry hives, Prefetch, Amcache, SRUM, scheduled tasks, shell
+#            history, launch agents, server logs, full memory dumps). Larger, slower, and some files are locked on a live OS.
+# The categories "registry", "execution", "persistence", "activity" and "server" only occur in the full profile.
+# =====================================================================================================================
+PROFILES = ("fast", "default", "full")
+
+RULES_FAST = {
+    "windows": [
+        ("system", "Windows/System32/winevt/Logs/System.evtx"),
+        ("system", "Windows/System32/winevt/Logs/Application.evtx"),
+        ("system", "Windows/System32/winevt/Logs/Security.evtx"),
+        ("system", "Windows/System32/winevt/Logs/Setup.evtx"),
+        ("system", "Windows/Logs/CBS/CBS.log"),
+        ("system", "Windows/INF/setupapi.dev.log"),
+        ("system", "Windows/Panther/setupact.log"),
+        ("system", "Windows/Panther/setuperr.log"),
+        ("system", "Windows/System32/LogFiles/Srt/SrtTrail.txt"),
+        ("crash", "Windows/Minidump/*.dmp"),
+        ("crash", "ProgramData/Microsoft/Windows/WER/**/*.wer"),
+        ("crash", "Users/*/AppData/Local/Microsoft/Windows/WER/**/*.wer"),
+    ],
+    "linux": [
+        ("system", "var/log/syslog*"),
+        ("system", "var/log/messages*"),
+        ("system", "var/log/kern.log*"),
+        ("system", "var/log/auth.log*"),
+        ("system", "var/log/secure*"),
+        ("system", "var/log/dmesg*"),
+        ("system", "var/log/boot.log*"),
+        ("system", "var/log/journal/**/*"),
+        ("system", "run/log/journal/**/*"),
+        ("security", "var/log/audit/audit.log*"),
+        ("crash", "var/lib/systemd/coredump/*"),
+        ("crash", "var/crash/**/*"),
+        ("context", "etc/os-release"),
+        ("context", "etc/hostname"),
+    ],
+    "macos": [
+        ("system", "private/var/log/system.log*"),
+        ("system", "private/var/log/install.log*"),
+        ("system", "private/var/db/diagnostics/**/*"),         # unified log (tracev3) ...
+        ("system", "private/var/db/uuidtext/**/*"),            # ... and the string tables needed to decode it
+        ("system", "private/var/db/timesync/*"),
+        ("crash", "Library/Logs/DiagnosticReports/*"),
+        ("crash", "Users/*/Library/Logs/DiagnosticReports/*"),
+        ("system", "Library/Receipts/InstallHistory.plist"),
+    ],
+}
+
+RULES_FULL = {
+    "windows": [
+        # --- crash / memory ---
+        ("crash", "Windows/Memory.dmp"),                       # can be many GB: over --max-size-mb it is reported as not_collected
+        ("crash", "Windows/LiveKernelReports/**/*.dmp"),
+        ("crash", "Windows/LiveKernelReports/**/*.wer"),
+        # --- registry hives (+ transaction logs, needed to replay uncommitted changes). Locked on a live system: use an image ---
+        ("registry", "Windows/System32/config/SYSTEM"), ("registry", "Windows/System32/config/SYSTEM.LOG*"),
+        ("registry", "Windows/System32/config/SOFTWARE"), ("registry", "Windows/System32/config/SOFTWARE.LOG*"),
+        ("registry", "Windows/System32/config/SECURITY"), ("registry", "Windows/System32/config/SECURITY.LOG*"),
+        ("registry", "Windows/System32/config/SAM"), ("registry", "Windows/System32/config/SAM.LOG*"),
+        ("registry", "Windows/System32/config/DEFAULT"), ("registry", "Windows/System32/config/DEFAULT.LOG*"),
+        ("registry", "Users/*/NTUSER.DAT"), ("registry", "Users/*/NTUSER.DAT.LOG*"),
+        ("registry", "Users/*/AppData/Local/Microsoft/Windows/UsrClass.dat"), ("registry", "Users/*/AppData/Local/Microsoft/Windows/UsrClass.dat.LOG*"),
+        # --- what ran, when ---
+        ("execution", "Windows/Prefetch/*.pf"),
+        ("execution", "Windows/AppCompat/Programs/Amcache.hve"), ("execution", "Windows/AppCompat/Programs/Amcache.hve.LOG*"),
+        ("execution", "Windows/System32/sru/SRUDB.dat"),       # SRUM: per-app CPU / network / memory per hour
+        ("execution", "Windows/System32/sru/*.log"),
+        # --- persistence ---
+        ("persistence", "Windows/System32/Tasks/**/*"),
+        ("persistence", "Windows/Tasks/*"),
+        ("persistence", "Windows/System32/drivers/etc/hosts"),
+        # --- user activity ---
+        ("activity", "Users/*/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/*.txt"),
+        ("activity", "Users/*/AppData/Roaming/Microsoft/Windows/Recent/**/*"),
+        ("activity", "Windows/System32/LogFiles/Sum/*"),       # User Access Logging (servers)
+        # --- server / security software ---
+        ("server", "inetpub/logs/LogFiles/**/*"),
+        ("server", "Program Files/Microsoft SQL Server/*/MSSQL/Log/*"),
+        ("server", "ProgramData/Microsoft/Windows Defender/Support/*"),
+        ("server", "ProgramData/Microsoft/Windows Defender/Scans/History/**/*"),
+    ],
+    "linux": [
+        ("persistence", "etc/crontab"), ("persistence", "etc/cron.d/*"), ("persistence", "etc/cron.hourly/*"),
+        ("persistence", "etc/cron.daily/*"), ("persistence", "etc/cron.weekly/*"), ("persistence", "etc/cron.monthly/*"),
+        ("persistence", "var/spool/cron/**/*"), ("persistence", "etc/anacrontab"),
+        ("persistence", "etc/systemd/system/**/*.service"), ("persistence", "etc/systemd/system/**/*.timer"),
+        ("persistence", "etc/rc.local"),
+        ("context", "etc/hosts"), ("context", "etc/resolv.conf"), ("context", "etc/netplan/*"),
+        ("context", "etc/passwd"), ("context", "etc/group"), ("context", "etc/sudoers"), ("context", "etc/sudoers.d/*"),
+        ("context", "etc/machine-id"), ("context", "var/lib/logrotate/status"),
+        ("context", "etc/kubernetes/*.conf"), ("context", "etc/kubernetes/manifests/*"),
+        ("activity", "home/*/.bash_history"), ("activity", "home/*/.zsh_history"),
+        ("activity", "root/.bash_history"), ("activity", "root/.zsh_history"),
+        ("application", "home/*/.local/share/Steam/logs/*"), ("application", "home/*/.steam/steam/logs/*"),
+        ("application", "home/*/steam-*.log"),
+    ],
+    "macos": [
+        ("persistence", "Library/LaunchDaemons/*.plist"), ("persistence", "Library/LaunchAgents/*.plist"),
+        ("persistence", "Users/*/Library/LaunchAgents/*.plist"),
+        ("system", "private/var/db/powerlog/**/*"),            # Powerlog: app / power / battery history
+        ("activity", ".fseventsd/*"), ("activity", "System/Volumes/Data/.fseventsd/*"),     # file-system change journal
+        ("crash", "Library/Application Support/CrashReporter/*"), ("crash", "Users/*/Library/Application Support/CrashReporter/*"),
+        ("context", "private/var/db/receipts/*.plist"),
+        ("context", "Library/Preferences/SystemConfiguration/*.plist"),
+        ("activity", "Users/*/.zsh_history"), ("activity", "Users/*/.bash_history"),
+    ],
+}
+
+
+def add_profile_args(ap):
+    ap.add_argument("--profile", choices=["fast", "full"], default=None,
+                    help="scan size. fast: quick scan of the key crash/boot/failure logs. (not given): default scan, every well-known log location. "
+                         "full: default + forensic artefacts (registry, Prefetch, Amcache, SRUM, scheduled tasks, shell history, launch agents, "
+                         "server logs, full memory dumps)")
+
+
+def rules_for(os_name, profile=None):
+    """[(category, glob)] for one OS under a scan profile. profile None / 'default' = RULES; unknown OS -> []."""
+    base = RULES.get(os_name, [])
+    if profile == "fast": return list(RULES_FAST.get(os_name, base))
+    if profile == "full": return list(base) + list(RULES_FULL.get(os_name, []))
+    if profile in (None, "default"): return list(base)
+    raise ValueError(f"unknown profile {profile!r}; choose from {PROFILES}")

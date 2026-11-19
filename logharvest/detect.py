@@ -1,4 +1,5 @@
 import os, plistlib, subprocess, sys
+from xml.parsers.expat import ExpatError
 from pathlib import Path
 from .rules import MARKERS
 
@@ -20,9 +21,10 @@ def _apple_product(root: Path) -> str | None:
         if not plist:
             return None
         with open(plist, "rb") as f:
-            name = str(plistlib.load(f).get("ProductName", "")).lower()
-    except (OSError, plistlib.InvalidFileException, ValueError, NotImplementedError):
-        return None
+            data = plistlib.load(f)
+        name = str(data.get("ProductName", "")).lower() if isinstance(data, dict) else ""
+    except (OSError, plistlib.InvalidFileException, ValueError, NotImplementedError, ExpatError):
+        return None                              # unreadable / empty / malformed plist: fall back to directory markers
     if name in ("macos", "mac os x"):
         return "macos"
     if name in ("ios", "iphone os", "ipados"):
@@ -94,8 +96,9 @@ def list_targets(extra_paths=()):
 
 
 def adb_devices():
+    from .android import adb_cmd          # honours LOGHARVEST_ADB / SDK locations as well as ADB_CMD
     try:
-        out = subprocess.run([*ADB_CMD, "devices"], capture_output=True, text=True, timeout=10).stdout
+        out = subprocess.run([*adb_cmd(), "devices"], capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return []
     return [l.split()[0] for l in out.splitlines()[1:] if l.strip().endswith("device")]
